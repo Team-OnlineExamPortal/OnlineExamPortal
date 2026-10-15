@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 
+const { router: authRouter } = require('./auth');  // ← ADD THIS LINE
 const { notFound, errorHandler } = require('./errors');
 
 function requestId(req, res, next) {
@@ -23,6 +24,9 @@ function createApp() {
   app.use(express.json({ limit: '100kb' }));
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+  // Auth/Admin module
+  app.use('/api/auth', authRouter);  // ← ADD THIS LINE
 
   // TEAMMATES: mount your routers here, e.g.
   //   app.use('/api/questions', questionRouter);
