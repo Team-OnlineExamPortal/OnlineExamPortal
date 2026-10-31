@@ -5,15 +5,20 @@
  *
  *   FR-001   register / log in with a unique email
  *   SEC-001  bcrypt password hashing
+ *   SEC-004  JWT expiry + validation on every secured request
  *
  * Exports for other modules:
- *   router - mounted at /api/auth
+ *   authenticate - middleware: requires a valid JWT, sets req.user
+ *   router       - mounted at /api/auth
+ *
+ * Usage in another module's router:
+ *   router.post('/', authenticate, handler);
  */
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-const { User } = require('./models');
+const { User, USER_STATUS } = require('./models');
 const { HttpError, asyncHandler } = require('./errors');
 
 const router = express.Router();
@@ -21,11 +26,16 @@ const router = express.Router();
 /* ----------------------------- configuration ----------------------------- */
 
 const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '10', 10);
+const JWT_ALGORITHM = 'HS256';
 
 function jwtSecret() {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET is not set');
   return secret;
+}
+
+function jwtExpiresIn() {
+  return process.env.JWT_EXPIRES_IN || '1h'; // SEC-004: tokens always expire
 }
 
 // Compared against when the email is unknown so login takes about the same time
@@ -81,7 +91,15 @@ function validateLogin(body) {
 /* -------------------------------- helpers -------------------------------- */
 
 function signToken(user) {
-  return jwt.sign({}, jwtSecret(), { subject: String(user.id) });
+  return jwt.sign({}, jwtSecret(), {
+    algorithm: JWT_ALGORITHM,
+    subject: String(user.id),
+    expiresIn: jwtExpiresIn(),
+  });
+}
+
+function unauthenticated(req, reason, message = 'Authentication required') {
+  return new HttpError(401, reason === 'TOKEN_EXPIRED' ? 'TOKEN_EXPIRED' : 'UNAUTHENTICATED', message);
 }
 
 /* --------------------------------- routes -------------------------------- */
@@ -121,9 +139,13 @@ router.post(
     const user = await User.findOne({ email });
     const passwordOk = await bcrypt.compare(password, user ? user.passwordHash : DUMMY_HASH);
 
-    if (!user || !passwordOk) {
-      // Same message for "unknown email" and "wrong password", so an attacker
-      // cannot tell which one was wrong.
+    let failure = null;
+    if (!user || !passwordOk) failure = 'INVALID_CREDENTIALS';
+    else if (user.status !== USER_STATUS.ACTIVE) failure = 'ACCOUNT_DISABLED';
+
+    if (failure) {
+      // The client always sees the same message, so an attacker cannot
+      // tell "unknown email" from "wrong password" from "disabled account".
       throw new HttpError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
@@ -131,4 +153,51 @@ router.post(
   })
 );
 
-module.exports = { router };
+/* ------------------------------- middleware ------------------------------ */
+
+/**
+ * SEC-004: validates the JWT on EVERY secured request - signature, algorithm
+ * and expiry - then re-loads the user so a deleted/disabled account loses
+ * access immediately.
+ */
+const authenticate = asyncHandler(async (req, res, next) => {
+  const header = req.get('authorization') || '';
+  const [scheme, token] = header.split(' ');
+  if (!scheme || scheme.toLowerCase() !== 'bearer' || !token) {
+    throw unauthenticated(req, 'MISSING_TOKEN');
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(token, jwtSecret(), { algorithms: [JWT_ALGORITHM] });
+  } catch (err) {
+    if (err.message === 'JWT_SECRET is not set') throw err; // config error -> 500
+    throw unauthenticated(
+      req,
+      err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+      err.name === 'TokenExpiredError' ? 'Token has expired' : 'Authentication required'
+    );
+  }
+
+  let user = null;
+  try {
+    user = await User.findById(payload.sub);
+  } catch (_) {
+    user = null; // malformed id in token
+  }
+  if (!user || user.status !== USER_STATUS.ACTIVE) {
+    throw unauthenticated(req, 'USER_INACTIVE');
+  }
+
+  req.user = {
+    userId: String(user.id),
+    name: user.name,
+    email: user.email,
+  };
+  next();
+});
+
+// GET /api/auth/me  ->  200 { userId, name, email }   (any signed-in user)
+router.get('/me', authenticate, (req, res) => res.json(req.user));
+
+module.exports = { router, authenticate };
