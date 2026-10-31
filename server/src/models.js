@@ -1,5 +1,12 @@
 'use strict';
 
+/**
+ * Mongoose models.
+ *
+ * Only the User model lives here for now (Auth/Admin module).
+ * Teammates: add Question, Exam, Attempt and Result schemas to this file
+ * (SAD 3.5 data design) and export them alongside User.
+ */
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema(
@@ -15,6 +22,7 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 254,
     },
+    // SEC-001: only the bcrypt hash is ever stored.
     passwordHash: { type: String, required: true, select: true },
   },
   { timestamps: true }
