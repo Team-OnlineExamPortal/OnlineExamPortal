@@ -4,6 +4,7 @@
  * Covers the Auth/Admin test cases from the STP:
  *   TC-01 (FR-001)            register / duplicate email / wrong password
  *   TC-19 (SEC-001)           bcrypt hash stored, plaintext absent
+ *   TC-20 (SEC-004)           expired / invalid JWT rejected
  *
  * The User model is replaced with an in-memory fake, so no MongoDB is needed.
  */
@@ -40,6 +41,7 @@ jest.mock('../src/models', () => {
 });
 
 const request = require('supertest');
+const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const { createApp } = require('../src/app');
 const { User } = require('../src/models');
@@ -117,6 +119,12 @@ describe('TC-01 / FR-001: register and log in with a unique email', () => {
     expect(res.body.message).toBe('Invalid email or password');
   });
 
+  test('disabled account cannot log in', async () => {
+    await addUser('d@example.com', 'Student', 'disabled');
+    const res = await loginAs('d@example.com');
+    expect(res.status).toBe(401);
+  });
+
   test('NoSQL operator injection in login is rejected (400)', async () => {
     await addUser('s@example.com', 'Student');
     const res = await request(app)
@@ -146,5 +154,62 @@ describe('TC-19 / SEC-001: passwords are bcrypt-hashed', () => {
     expect(stored.passwordHash).toMatch(/^\$2[aby]\$\d{2}\$/);
     expect(JSON.stringify(stored)).not.toContain(PASSWORD);
     expect(await bcrypt.compare(PASSWORD, stored.passwordHash)).toBe(true);
+  });
+});
+
+describe('TC-20 / SEC-004: JWT expiry and validation', () => {
+  test('expired token -> 401 TOKEN_EXPIRED', async () => {
+    const user = await addUser('s@example.com', 'Student');
+    const expired = jwt.sign({ role: 'Student' }, process.env.JWT_SECRET, {
+      subject: user.id,
+      expiresIn: -10,
+    });
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${expired}`);
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('TOKEN_EXPIRED');
+  });
+
+  test('garbage token and wrong-secret token -> 401', async () => {
+    const user = await addUser('s@example.com', 'Student');
+    const wrongSecret = jwt.sign({ role: 'Student' }, 'another-secret-another-secret-xyz', {
+      subject: user.id,
+      expiresIn: '1h',
+    });
+    for (const token of ['not.a.jwt', wrongSecret]) {
+      const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(401);
+    }
+  });
+
+  test('alg=none token is rejected', async () => {
+    const user = await addUser('s@example.com', 'Student');
+    const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const none = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: user.id })}.`;
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${none}`);
+    expect(res.status).toBe(401);
+  });
+
+  test('token of a disabled/removed user is rejected immediately', async () => {
+    const user = await addUser('s@example.com', 'Student');
+    const token = (await loginAs('s@example.com')).body.token;
+    user.status = 'disabled';
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(401);
+  });
+
+  test('issued tokens carry an expiry', async () => {
+    await addUser('s@example.com', 'Student');
+    const { token } = (await loginAs('s@example.com')).body;
+    const decoded = jwt.decode(token);
+    expect(decoded.exp).toBeGreaterThan(decoded.iat);
+  });
+
+  test('/api/auth/me returns the signed-in user without the hash', async () => {
+    await addUser('s@example.com', 'Student');
+    const token = (await loginAs('s@example.com')).body.token;
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(expect.objectContaining({ email: 's@example.com' }));
+    expect(JSON.stringify(res.body)).not.toMatch(/passwordHash/);
   });
 });
