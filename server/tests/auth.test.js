@@ -3,6 +3,7 @@
 /**
  * Covers the Auth/Admin test cases from the STP:
  *   TC-01 (FR-001)            register / duplicate email / wrong password
+ *   TC-19 (SEC-001)           bcrypt hash stored, plaintext absent
  *
  * The User model is replaced with an in-memory fake, so no MongoDB is needed.
  */
@@ -88,6 +89,7 @@ describe('TC-01 / FR-001: register and log in with a unique email', () => {
     [{ name: '', email: 'a@b.co', password: PASSWORD }],
     [{ name: 'A', email: 'not-an-email', password: PASSWORD }],
     [{ name: 'A', email: 'a@b.co', password: 'short' }],
+    [{ name: 'A', email: 'a@b.co', password: 'x'.repeat(73) }],
     [{ name: 'A', email: 'a@b.co' }],
   ])('invalid registration -> 400 (%j)', async (body) => {
     const res = await request(app).post('/api/auth/register').send(body);
@@ -132,5 +134,17 @@ describe('TC-01 / FR-001: register and log in with a unique email', () => {
     expect(res.body).toEqual(
       expect.objectContaining({ code: 'INVALID_JSON', requestId: expect.any(String) })
     );
+  });
+});
+
+describe('TC-19 / SEC-001: passwords are bcrypt-hashed', () => {
+  test('stored credential is a bcrypt hash; plaintext is absent', async () => {
+    await request(app)
+      .post('/api/auth/register')
+      .send({ name: 'Asha', email: 'asha@example.com', password: PASSWORD });
+    const stored = User.__store[0];
+    expect(stored.passwordHash).toMatch(/^\$2[aby]\$\d{2}\$/);
+    expect(JSON.stringify(stored)).not.toContain(PASSWORD);
+    expect(await bcrypt.compare(PASSWORD, stored.passwordHash)).toBe(true);
   });
 });
