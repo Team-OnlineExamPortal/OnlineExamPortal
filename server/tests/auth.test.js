@@ -5,7 +5,8 @@
  *   TC-01 (FR-001)            register / duplicate email / wrong password
  *   TC-02 (FR-002, SEC-002)   student token on admin API -> 403
  *   TC-19 (SEC-001)           bcrypt hash stored, plaintext absent
- *   TC-20 (SEC-004)           expired / invalid JWT rejected
+ *   TC-20 (SEC-004, SEC-006)  expired / invalid JWT rejected, events logged
+ *   TC-29 (SEC-006)           repeated forbidden calls are all audited
  *
  * The User model is replaced with an in-memory fake, so no MongoDB is needed.
  */
@@ -46,6 +47,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const { createApp } = require('../src/app');
 const { User } = require('../src/models');
+const audit = require('../src/audit');
 
 const app = createApp();
 const PASSWORD = 'Str0ngPassw0rd!';
@@ -64,8 +66,10 @@ async function loginAs(email, password = PASSWORD) {
   return request(app).post('/api/auth/login').send({ email, password });
 }
 
+let auditSpy;
 beforeEach(() => {
   User.__store.length = 0;
+  auditSpy = jest.spyOn(audit, 'record');
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -116,11 +120,14 @@ describe('TC-01 / FR-001: register and log in with a unique email', () => {
     expect(typeof res.body.token).toBe('string');
   });
 
-  test('wrong password -> 401', async () => {
+  test('wrong password -> 401 and the failure is audited', async () => {
     await addUser('s@example.com', 'Student');
     const res = await loginAs('s@example.com', 'WrongPassword1!');
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('INVALID_CREDENTIALS');
+    expect(auditSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'LOGIN_FAILED', reason: 'INVALID_CREDENTIALS' })
+    );
   });
 
   test('unknown email gives the same 401 as a wrong password', async () => {
@@ -133,6 +140,7 @@ describe('TC-01 / FR-001: register and log in with a unique email', () => {
     await addUser('d@example.com', 'Student', 'disabled');
     const res = await loginAs('d@example.com');
     expect(res.status).toBe(401);
+    expect(auditSpy).toHaveBeenCalledWith(expect.objectContaining({ reason: 'ACCOUNT_DISABLED' }));
   });
 
   test('NoSQL operator injection in login is rejected (400)', async () => {
@@ -208,7 +216,7 @@ describe('TC-02 / FR-002 + SEC-002: role-based access', () => {
 });
 
 describe('TC-20 / SEC-004: JWT expiry and validation', () => {
-  test('expired token -> 401 TOKEN_EXPIRED', async () => {
+  test('expired token -> 401 TOKEN_EXPIRED and audited', async () => {
     const user = await addUser('s@example.com', 'Student');
     const expired = jwt.sign({ role: 'Student' }, process.env.JWT_SECRET, {
       subject: user.id,
@@ -217,6 +225,9 @@ describe('TC-20 / SEC-004: JWT expiry and validation', () => {
     const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${expired}`);
     expect(res.status).toBe(401);
     expect(res.body.code).toBe('TOKEN_EXPIRED');
+    expect(auditSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'UNAUTHENTICATED', reason: 'TOKEN_EXPIRED' })
+    );
   });
 
   test('garbage token and wrong-secret token -> 401', async () => {
@@ -252,5 +263,50 @@ describe('TC-20 / SEC-004: JWT expiry and validation', () => {
     const { token } = (await loginAs('s@example.com')).body;
     const decoded = jwt.decode(token);
     expect(decoded.exp).toBeGreaterThan(decoded.iat);
+  });
+});
+
+describe('TC-20 + TC-29 / SEC-006: audit trail', () => {
+  test('repeated forbidden calls are each recorded, without secrets', async () => {
+    await addUser('s@example.com', 'Student');
+    const token = (await loginAs('s@example.com')).body.token;
+
+    for (let i = 0; i < 3; i += 1) {
+      const r = await request(app).get('/api/admin/ping?x=1').set('Authorization', `Bearer ${token}`);
+      expect(r.status).toBe(403);
+    }
+
+    const forbidden = auditSpy.mock.calls.map((c) => c[0]).filter((e) => e.type === 'FORBIDDEN');
+    expect(forbidden).toHaveLength(3);
+    forbidden.forEach((e) =>
+      expect(e).toEqual(
+        expect.objectContaining({ role: 'Student', path: '/api/admin/ping', requestId: expect.any(String) })
+      )
+    );
+
+    // What would actually be written: whitelisted fields only.
+    const written = JSON.stringify(forbidden.map((e) => audit.buildEntry(e)));
+    expect(written).not.toContain(token);
+    expect(written).not.toContain(PASSWORD);
+    expect(written).not.toMatch(/authorization|bearer|passwordHash/i);
+  });
+
+  test('buildEntry drops anything not on the whitelist', () => {
+    const entry = audit.buildEntry({
+      type: 'LOGIN_FAILED',
+      password: 'hunter2',
+      token: 'abc.def.ghi',
+      reason: 'INVALID_CREDENTIALS',
+    });
+    expect(entry).not.toHaveProperty('password');
+    expect(entry).not.toHaveProperty('token');
+    expect(entry).toEqual(expect.objectContaining({ type: 'LOGIN_FAILED', timestamp: expect.any(String) }));
+  });
+
+  test('failed-login audit entry never contains the password', async () => {
+    await addUser('s@example.com', 'Student');
+    await loginAs('s@example.com', 'WrongPassword1!');
+    const events = auditSpy.mock.calls.map((c) => audit.buildEntry(c[0]));
+    expect(JSON.stringify(events)).not.toContain('WrongPassword1!');
   });
 });

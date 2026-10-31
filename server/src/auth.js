@@ -8,6 +8,7 @@
  *   SEC-001  bcrypt password hashing
  *   SEC-002  reject unauthorized access to role-protected APIs
  *   SEC-004  JWT expiry + validation on every secured request
+ *   SEC-006  audit log of failed logins and unauthorized attempts
  *
  * Exports for other modules:
  *   authenticate          - middleware: requires a valid JWT, sets req.user
@@ -23,6 +24,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const { User, ROLES, USER_STATUS } = require('./models');
+const audit = require('./audit');
 const { HttpError, asyncHandler } = require('./errors');
 
 const router = express.Router();
@@ -103,6 +105,7 @@ function signToken(user) {
 }
 
 function unauthenticated(req, reason, message = 'Authentication required') {
+  audit.record({ type: audit.EVENTS.UNAUTHENTICATED, reason, ...audit.fromRequest(req) });
   return new HttpError(401, reason === 'TOKEN_EXPIRED' ? 'TOKEN_EXPIRED' : 'UNAUTHENTICATED', message);
 }
 
@@ -151,8 +154,15 @@ router.post(
     else if (user.status !== USER_STATUS.ACTIVE) failure = 'ACCOUNT_DISABLED';
 
     if (failure) {
-      // The client always sees the same message, so an attacker cannot
+      // SEC-006. The client always sees the same message, so an attacker cannot
       // tell "unknown email" from "wrong password" from "disabled account".
+      audit.record({
+        type: audit.EVENTS.LOGIN_FAILED,
+        reason: failure,
+        email,
+        userId: user ? user.id : undefined,
+        ...audit.fromRequest(req),
+      });
       throw new HttpError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
@@ -216,6 +226,13 @@ function requireRole(...allowedRoles) {
       return next(unauthenticated(req, 'MISSING_TOKEN'));
     }
     if (!allowedRoles.includes(req.user.role)) {
+      audit.record({
+        type: audit.EVENTS.FORBIDDEN,
+        reason: 'INSUFFICIENT_ROLE',
+        userId: req.user.userId,
+        role: req.user.role,
+        ...audit.fromRequest(req),
+      });
       return next(new HttpError(403, 'FORBIDDEN', 'You do not have permission to perform this action'));
     }
     return next();
