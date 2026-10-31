@@ -3,7 +3,7 @@
 /**
  * Covers the Auth/Admin test cases from the STP:
  *   TC-01 (FR-001)            register / duplicate email / wrong password
- *   TC-02 (FR-002)            student token on admin API -> 403
+ *   TC-02 (FR-002, SEC-002)   student token on admin API -> 403
  *   TC-19 (SEC-001)           bcrypt hash stored, plaintext absent
  *   TC-20 (SEC-004)           expired / invalid JWT rejected
  *
@@ -167,7 +167,7 @@ describe('TC-19 / SEC-001: passwords are bcrypt-hashed', () => {
   });
 });
 
-describe('TC-02 / FR-002: role-based access', () => {
+describe('TC-02 / FR-002 + SEC-002: role-based access', () => {
   test('student token on an admin API -> 403, admin token -> 200', async () => {
     await addUser('s@example.com', 'Student');
     await addUser('a@example.com', 'Administrator');
@@ -180,6 +180,21 @@ describe('TC-02 / FR-002: role-based access', () => {
 
     const allowed = await request(app).get('/api/admin/ping').set('Authorization', `Bearer ${admin}`);
     expect(allowed.status).toBe(200);
+  });
+
+  test('no token -> 401', async () => {
+    const res = await request(app).get('/api/admin/ping');
+    expect(res.status).toBe(401);
+  });
+
+  test('role comes from the database, not the token claim', async () => {
+    const user = await addUser('s@example.com', 'Student');
+    const forged = jwt.sign({ role: 'Administrator' }, process.env.JWT_SECRET, {
+      subject: user.id,
+      expiresIn: '1h',
+    });
+    const res = await request(app).get('/api/admin/ping').set('Authorization', `Bearer ${forged}`);
+    expect(res.status).toBe(403);
   });
 
   test('/api/auth/me returns the signed-in user without the hash', async () => {
@@ -219,8 +234,8 @@ describe('TC-20 / SEC-004: JWT expiry and validation', () => {
   test('alg=none token is rejected', async () => {
     const user = await addUser('s@example.com', 'Student');
     const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-    const none = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: user.id })}.`;
-    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${none}`);
+    const none = `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub: user.id, role: 'Administrator' })}.`;
+    const res = await request(app).get('/api/admin/ping').set('Authorization', `Bearer ${none}`);
     expect(res.status).toBe(401);
   });
 
