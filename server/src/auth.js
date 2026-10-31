@@ -6,6 +6,7 @@
  *   FR-001   register / log in with a unique email
  *   FR-002   Student vs Administrator access
  *   SEC-001  bcrypt password hashing
+ *   SEC-002  reject unauthorized access to role-protected APIs
  *   SEC-004  JWT expiry + validation on every secured request
  *
  * Exports for other modules:
@@ -164,7 +165,8 @@ router.post(
 /**
  * SEC-004: validates the JWT on EVERY secured request - signature, algorithm
  * and expiry - then re-loads the user so a deleted/disabled account loses
- * access immediately.
+ * access immediately. The role is taken from the database, not trusted from
+ * the token, so a role change takes effect at once.
  */
 const authenticate = asyncHandler(async (req, res, next) => {
   const header = req.get('authorization') || '';
@@ -205,11 +207,14 @@ const authenticate = asyncHandler(async (req, res, next) => {
 });
 
 /**
- * FR-002: server-side RBAC. Use AFTER `authenticate`.
+ * FR-002 / SEC-002: server-side RBAC. Use AFTER `authenticate`.
  *   router.get('/x', authenticate, requireRole(ROLES.ADMIN), handler)
  */
 function requireRole(...allowedRoles) {
   return (req, res, next) => {
+    if (!req.user) {
+      return next(unauthenticated(req, 'MISSING_TOKEN'));
+    }
     if (!allowedRoles.includes(req.user.role)) {
       return next(new HttpError(403, 'FORBIDDEN', 'You do not have permission to perform this action'));
     }
