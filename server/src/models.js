@@ -9,6 +9,11 @@
  */
 const mongoose = require('mongoose');
 
+const ROLES = Object.freeze({
+  STUDENT: 'Student',
+  ADMIN: 'Administrator',
+});
+
 const USER_STATUS = Object.freeze({
   ACTIVE: 'active',
   DISABLED: 'disabled',
@@ -29,6 +34,7 @@ const userSchema = new mongoose.Schema(
     },
     // SEC-001: only the bcrypt hash is ever stored.
     passwordHash: { type: String, required: true, select: true },
+    role: { type: String, enum: Object.values(ROLES), default: ROLES.STUDENT, required: true },
     status: { type: String, enum: Object.values(USER_STATUS), default: USER_STATUS.ACTIVE },
   },
   { timestamps: true }
@@ -36,4 +42,4 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 
-module.exports = { User, USER_STATUS };
+module.exports = { User, ROLES, USER_STATUS };

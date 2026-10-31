@@ -3,6 +3,7 @@
 /**
  * Covers the Auth/Admin test cases from the STP:
  *   TC-01 (FR-001)            register / duplicate email / wrong password
+ *   TC-02 (FR-002)            student token on admin API -> 403
  *   TC-19 (SEC-001)           bcrypt hash stored, plaintext absent
  *   TC-20 (SEC-004)           expired / invalid JWT rejected
  *
@@ -76,6 +77,14 @@ describe('TC-01 / FR-001: register and log in with a unique email', () => {
     expect(res.status).toBe(201);
     expect(res.body.userId).toBeTruthy();
     expect(User.__store[0].email).toBe('asha@example.com'); // normalized
+    expect(User.__store[0].role).toBe('Student');
+  });
+
+  test('ignores a client-supplied role (no self-made admins)', async () => {
+    await request(app)
+      .post('/api/auth/register')
+      .send({ name: 'Eve', email: 'eve@example.com', password: PASSWORD, role: 'Administrator' });
+    expect(User.__store[0].role).toBe('Student');
   });
 
   test('duplicate email -> 409', async () => {
@@ -99,10 +108,11 @@ describe('TC-01 / FR-001: register and log in with a unique email', () => {
     expect(res.body.code).toBe('VALIDATION_ERROR');
   });
 
-  test('valid credentials return a token', async () => {
+  test('valid credentials return a token and role', async () => {
     await addUser('s@example.com', 'Student');
     const res = await loginAs('s@example.com');
     expect(res.status).toBe(200);
+    expect(res.body.role).toBe('Student');
     expect(typeof res.body.token).toBe('string');
   });
 
@@ -157,6 +167,31 @@ describe('TC-19 / SEC-001: passwords are bcrypt-hashed', () => {
   });
 });
 
+describe('TC-02 / FR-002: role-based access', () => {
+  test('student token on an admin API -> 403, admin token -> 200', async () => {
+    await addUser('s@example.com', 'Student');
+    await addUser('a@example.com', 'Administrator');
+    const student = (await loginAs('s@example.com')).body.token;
+    const admin = (await loginAs('a@example.com')).body.token;
+
+    const denied = await request(app).get('/api/admin/ping').set('Authorization', `Bearer ${student}`);
+    expect(denied.status).toBe(403);
+    expect(denied.body.code).toBe('FORBIDDEN');
+
+    const allowed = await request(app).get('/api/admin/ping').set('Authorization', `Bearer ${admin}`);
+    expect(allowed.status).toBe(200);
+  });
+
+  test('/api/auth/me returns the signed-in user without the hash', async () => {
+    await addUser('s@example.com', 'Student');
+    const token = (await loginAs('s@example.com')).body.token;
+    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(expect.objectContaining({ email: 's@example.com', role: 'Student' }));
+    expect(JSON.stringify(res.body)).not.toMatch(/passwordHash/);
+  });
+});
+
 describe('TC-20 / SEC-004: JWT expiry and validation', () => {
   test('expired token -> 401 TOKEN_EXPIRED', async () => {
     const user = await addUser('s@example.com', 'Student');
@@ -202,14 +237,5 @@ describe('TC-20 / SEC-004: JWT expiry and validation', () => {
     const { token } = (await loginAs('s@example.com')).body;
     const decoded = jwt.decode(token);
     expect(decoded.exp).toBeGreaterThan(decoded.iat);
-  });
-
-  test('/api/auth/me returns the signed-in user without the hash', async () => {
-    await addUser('s@example.com', 'Student');
-    const token = (await loginAs('s@example.com')).body.token;
-    const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual(expect.objectContaining({ email: 's@example.com' }));
-    expect(JSON.stringify(res.body)).not.toMatch(/passwordHash/);
   });
 });

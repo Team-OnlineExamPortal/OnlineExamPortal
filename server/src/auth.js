@@ -4,21 +4,24 @@
  * Authentication & Administration module (Saikavin S - PES1UG24CS402)
  *
  *   FR-001   register / log in with a unique email
+ *   FR-002   Student vs Administrator access
  *   SEC-001  bcrypt password hashing
  *   SEC-004  JWT expiry + validation on every secured request
  *
  * Exports for other modules:
- *   authenticate - middleware: requires a valid JWT, sets req.user
- *   router       - mounted at /api/auth
+ *   authenticate          - middleware: requires a valid JWT, sets req.user
+ *   requireRole(...roles) - middleware: requires req.user.role in roles
+ *   ROLES                 - { STUDENT, ADMIN }
+ *   router                - mounted at /api/auth
  *
  * Usage in another module's router:
- *   router.post('/', authenticate, handler);
+ *   router.post('/', authenticate, requireRole(ROLES.ADMIN), handler);
  */
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-const { User, USER_STATUS } = require('./models');
+const { User, ROLES, USER_STATUS } = require('./models');
 const { HttpError, asyncHandler } = require('./errors');
 
 const router = express.Router();
@@ -91,7 +94,7 @@ function validateLogin(body) {
 /* -------------------------------- helpers -------------------------------- */
 
 function signToken(user) {
-  return jwt.sign({}, jwtSecret(), {
+  return jwt.sign({ role: user.role }, jwtSecret(), {
     algorithm: JWT_ALGORITHM,
     subject: String(user.id),
     expiresIn: jwtExpiresIn(),
@@ -110,6 +113,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const { name, email, password } = validateRegistration(req.body);
 
+    // Public registration ALWAYS creates a Student. Any "role" sent by the
+    // client is ignored (prevents privilege escalation). Administrators are
+    // created with `npm run seed:users`.
     if (await User.findOne({ email })) {
       throw new HttpError(409, 'EMAIL_EXISTS', 'An account with this email already exists');
     }
@@ -117,7 +123,7 @@ router.post(
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS); // SEC-001
     let user;
     try {
-      user = await User.create({ name, email, passwordHash });
+      user = await User.create({ name, email, passwordHash, role: ROLES.STUDENT });
     } catch (err) {
       if (err && err.code === 11000) {
         // Lost a race with a simultaneous registration (unique index).
@@ -130,7 +136,7 @@ router.post(
   })
 );
 
-// POST /api/auth/login  ->  200 { token } | 400 | 401
+// POST /api/auth/login  ->  200 { token, role } | 400 | 401
 router.post(
   '/login',
   asyncHandler(async (req, res) => {
@@ -149,7 +155,7 @@ router.post(
       throw new HttpError(401, 'INVALID_CREDENTIALS', 'Invalid email or password');
     }
 
-    res.status(200).json({ token: signToken(user) });
+    res.status(200).json({ token: signToken(user), role: user.role });
   })
 );
 
@@ -193,11 +199,25 @@ const authenticate = asyncHandler(async (req, res, next) => {
     userId: String(user.id),
     name: user.name,
     email: user.email,
+    role: user.role,
   };
   next();
 });
 
-// GET /api/auth/me  ->  200 { userId, name, email }   (any signed-in user)
+/**
+ * FR-002: server-side RBAC. Use AFTER `authenticate`.
+ *   router.get('/x', authenticate, requireRole(ROLES.ADMIN), handler)
+ */
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!allowedRoles.includes(req.user.role)) {
+      return next(new HttpError(403, 'FORBIDDEN', 'You do not have permission to perform this action'));
+    }
+    return next();
+  };
+}
+
+// GET /api/auth/me  ->  200 { userId, name, email, role }   (any signed-in user)
 router.get('/me', authenticate, (req, res) => res.json(req.user));
 
-module.exports = { router, authenticate };
+module.exports = { router, authenticate, requireRole, ROLES };

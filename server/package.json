@@ -11,7 +11,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "jest --runInBand",
-    "test:coverage": "jest --runInBand --coverage"
+    "test:coverage": "jest --runInBand --coverage",
+    "seed:users": "node scripts/seed-users.js"
   },
   "jest": {
     "testEnvironment": "node",
