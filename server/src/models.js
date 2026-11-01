@@ -3,9 +3,7 @@
 /**
  * Mongoose models.
  *
- * Only the User model lives here for now (Auth/Admin module).
- * Teammates: add Question, Exam, Attempt and Result schemas to this file
- * (SAD 3.5 data design) and export them alongside User.
+ * Schemas defined per SAD §3.5 data design.
  */
 const mongoose = require('mongoose');
 
@@ -42,4 +40,36 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 
-module.exports = { User, ROLES, USER_STATUS };
+// FR-004: Exam management schema (SAD §3.5)
+const examSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true, maxlength: 200 },
+    durationMinutes: { type: Number, required: true, min: 1 },
+    startTime: { type: Date, required: true },
+    endTime: { type: Date, required: true },
+    category: { type: String, required: true, trim: true },
+    questionCount: { type: Number, required: true, min: 1 },
+    negativeMarking: { type: Boolean, default: false },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  },
+  { timestamps: true }
+);
+
+const Exam = mongoose.models.Exam || mongoose.model('Exam', examSchema);
+
+// FR-003: Question bank schema (SAD §3.5)
+const questionSchema = new mongoose.Schema(
+  {
+    text: { type: String, required: true, trim: true },
+    options: [{ type: String, required: true }],
+    correctOption: { type: Number, required: true },
+    category: { type: String, required: true, trim: true },
+    status: { type: String, enum: Object.values(USER_STATUS), default: USER_STATUS.ACTIVE },
+    disabled: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
+const Question = mongoose.models.Question || mongoose.model('Question', questionSchema);
+
+module.exports = { User, Exam, Question, ROLES, USER_STATUS };
