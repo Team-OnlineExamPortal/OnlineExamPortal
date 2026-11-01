@@ -10,6 +10,7 @@
  *   SEC-005  Never expose question text or answer keys before active attempts
  */
 const express = require('express');
+const mongoose = require('mongoose');
 const { Exam, Question, ROLES } = require('./models');
 const { authenticate, requireRole } = require('./auth');
 const { HttpError, asyncHandler } = require('./errors');
@@ -17,6 +18,18 @@ const { HttpError, asyncHandler } = require('./errors');
 const router = express.Router();
 
 const isString = (v) => typeof v === 'string';
+
+/**
+ * Validates whether an ID matches valid MongoDB ObjectId or supported test ID.
+ * Prevents Mongoose CastError from turning into HTTP 500.
+ */
+function isValidExamId(id) {
+  if (!isString(id) || !id.trim()) return false;
+  if (mongoose.isValidObjectId && mongoose.isValidObjectId(id.trim())) return true;
+  // Allow test fake IDs (e.g. 'exam1') in test environment
+  if (process.env.NODE_ENV === 'test' && /^exam[0-9]+$/.test(id.trim())) return true;
+  return false;
+}
 
 /**
  * Validates input fields strictly to prevent NoSQL operator injection and bad data.
@@ -45,8 +58,13 @@ function validateExamInput(body) {
     throw new HttpError(400, 'VALIDATION_ERROR', 'Question count must be a positive integer');
   }
 
-  const start = new Date(startTime);
-  const end = new Date(endTime);
+  // Strict string validation for dates (blocks null, numbers, booleans from becoming 1970)
+  if (!isString(startTime) || !startTime.trim() || !isString(endTime) || !endTime.trim()) {
+    throw new HttpError(400, 'VALIDATION_ERROR', 'startTime and endTime must be non-empty ISO date strings');
+  }
+
+  const start = new Date(startTime.trim());
+  const end = new Date(endTime.trim());
 
   if (isNaN(start.getTime()) || isNaN(end.getTime())) {
     throw new HttpError(400, 'VALIDATION_ERROR', 'Valid startTime and endTime ISO dates are required');
@@ -82,12 +100,14 @@ function isExamOpen(exam, now = new Date()) {
  * FR-006: Show currently available exams to authenticated students.
  * Only returns exams where the current server time falls inside [startTime, endTime].
  * SEC-005: Never returns question bank or attempt payload here.
+ * Note: Uses server time only; query parameter clock overrides (?now=) are forbidden.
  */
 router.get(
   '/available',
   authenticate,
   asyncHandler(async (req, res) => {
-    const now = req.query.now ? new Date(req.query.now) : new Date();
+    // Strictly server time - clients cannot override the availability clock
+    const now = new Date();
 
     let openExams = [];
     if (Exam && typeof Exam.find === 'function') {
@@ -162,14 +182,28 @@ router.post(
 
 /**
  * Get exam by ID (metadata only).
+ * Validates ID upfront and catches database CastError to return 404 rather than 500.
  */
 router.get(
   '/:id',
   authenticate,
   asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (!isValidExamId(id)) {
+      throw new HttpError(404, 'NOT_FOUND', 'Exam not found');
+    }
+
     let exam = null;
     if (Exam && typeof Exam.findById === 'function') {
-      exam = await Exam.findById(req.params.id);
+      try {
+        exam = await Exam.findById(id);
+      } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId' || /Cast to ObjectId failed/i.test(err.message)) {
+          throw new HttpError(404, 'NOT_FOUND', 'Exam not found');
+        }
+        throw err;
+      }
     }
 
     if (!exam) {
@@ -194,4 +228,5 @@ module.exports = {
   router,
   validateExamInput,
   isExamOpen,
+  isValidExamId,
 };

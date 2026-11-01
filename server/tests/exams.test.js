@@ -7,10 +7,16 @@
  *   TC-08 / SEC-002           Access control: 403 for students, 401 unauthenticated
  *   TC-21 / SEC-003           Input validation against NoSQL injection
  *   TC-22 / SEC-005           Never leak questions or correct answers before active attempts
+ *   Regression tests:
+ *     - Strict rejection of null/falsy dates (prevents Jan 1, 1970 bypass)
+ *     - Disallow client ?now= clock override on availability endpoint
+ *     - Malformed / invalid ObjectId handling (returns 404/400, never 500)
  */
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret-123';
 process.env.BCRYPT_ROUNDS = '4';
+
+const mongoose = require('mongoose');
 
 jest.mock('../src/models', () => {
   const users = [];
@@ -56,7 +62,17 @@ jest.mock('../src/models', () => {
       });
     },
     async findById(id) {
-      return exams.find((e) => e.id === String(id) || e._id === String(id)) || null;
+      // Simulate real Mongoose throwing CastError for malformed ObjectId
+      const idStr = String(id);
+      const isHexObjectId = /^[0-9a-fA-F]{24}$/.test(idStr);
+      const isTestId = /^exam[0-9]+$/.test(idStr);
+      if (!isHexObjectId && !isTestId) {
+        const err = new Error(`Cast to ObjectId failed for value "${idStr}" (type string) at path "_id" for model "Exam"`);
+        err.name = 'CastError';
+        err.kind = 'ObjectId';
+        throw err;
+      }
+      return exams.find((e) => e.id === idStr || e._id === idStr) || null;
     },
   };
 
@@ -84,7 +100,7 @@ const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const { createApp } = require('../src/app');
 const { User, Exam, Question, ROLES } = require('../src/models');
-const { isExamOpen, validateExamInput } = require('../src/exams');
+const { isExamOpen, validateExamInput, isValidExamId } = require('../src/exams');
 
 const app = createApp();
 
@@ -263,6 +279,52 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('VALIDATION_ERROR');
     });
+
+    describe('Regression: Strict Date Validation (No Jan 1, 1970 null bypass)', () => {
+      test('rejects null startTime with 400 VALIDATION_ERROR', async () => {
+        const res = await request(app)
+          .post('/api/exams')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            title: 'Null Start Exam',
+            category: 'DataStructures',
+            durationMinutes: 30,
+            questionCount: 2,
+            startTime: null,
+            endTime: new Date(Date.now() + 3600000).toISOString(),
+          });
+
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe('VALIDATION_ERROR');
+      });
+
+      test('rejects non-string or empty dates (null, numbers, boolean, empty string)', async () => {
+        const invalidCases = [
+          { startTime: 0, endTime: new Date(Date.now() + 3600000).toISOString() },
+          { startTime: false, endTime: new Date(Date.now() + 3600000).toISOString() },
+          { startTime: '', endTime: new Date(Date.now() + 3600000).toISOString() },
+          { startTime: '   ', endTime: new Date(Date.now() + 3600000).toISOString() },
+          { startTime: new Date().toISOString(), endTime: null },
+          { startTime: 'invalid-date', endTime: new Date(Date.now() + 3600000).toISOString() },
+        ];
+
+        for (const c of invalidCases) {
+          const res = await request(app)
+            .post('/api/exams')
+            .set('Authorization', `Bearer ${adminToken}`)
+            .send({
+              title: 'Invalid Date Test',
+              category: 'DataStructures',
+              durationMinutes: 30,
+              questionCount: 2,
+              ...c,
+            });
+
+          expect(res.status).toBe(400);
+          expect(res.body.code).toBe('VALIDATION_ERROR');
+        }
+      });
+    });
   });
 
   describe('GET /api/exams/available (FR-006, SEC-005)', () => {
@@ -311,6 +373,30 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
       expect(titles).not.toContain('Upcoming Future Exam');
     });
 
+    test('Regression: ignores client ?now= parameter and strictly adheres to server clock', async () => {
+      // Client tries to pass a future time to view future exams
+      const futureTime = new Date(Date.now() + 5000000).toISOString();
+      const resFuture = await request(app)
+        .get(`/api/exams/available?now=${futureTime}`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(resFuture.status).toBe(200);
+      const futureTitles = resFuture.body.map((e) => e.title);
+      expect(futureTitles).toContain('Currently Active Exam');
+      expect(futureTitles).not.toContain('Upcoming Future Exam');
+
+      // Client tries to pass a past time to view expired exams
+      const pastTime = new Date(Date.now() - 5000000).toISOString();
+      const resPast = await request(app)
+        .get(`/api/exams/available?now=${pastTime}`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(resPast.status).toBe(200);
+      const pastTitles = resPast.body.map((e) => e.title);
+      expect(pastTitles).toContain('Currently Active Exam');
+      expect(pastTitles).not.toContain('Past Expired Exam');
+    });
+
     test('SEC-005: available exams endpoint never exposes questions or answers', async () => {
       const res = await request(app)
         .get('/api/exams/available')
@@ -343,13 +429,35 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
       expect(res.body.title).toBe(exam.title);
     });
 
-    test('returns 404 for nonexistent exam ID', async () => {
+    test('returns 404 for nonexistent valid-format exam ID', async () => {
       const res = await request(app)
-        .get('/api/exams/nonexistent-id')
+        .get('/api/exams/exam99999')
         .set('Authorization', `Bearer ${studentToken}`);
 
       expect(res.status).toBe(404);
       expect(res.body.code).toBe('NOT_FOUND');
+    });
+
+    describe('Regression: Malformed exam IDs do not crash with HTTP 500', () => {
+      test('malformed string ID returns 404 NOT_FOUND (never HTTP 500)', async () => {
+        const malformedIds = [
+          'not-a-valid-id',
+          '12345',
+          '../../etc/passwd',
+          'null',
+          'undefined',
+          '507f1f77bcf86cd79943901z', // 24 chars but invalid hex 'z'
+        ];
+
+        for (const badId of malformedIds) {
+          const res = await request(app)
+            .get(`/api/exams/${badId}`)
+            .set('Authorization', `Bearer ${studentToken}`);
+
+          expect(res.status).toBe(404);
+          expect(res.body.code).toBe('NOT_FOUND');
+        }
+      });
     });
   });
 
@@ -367,6 +475,14 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
 
       expect(isExamOpen(openExam, now)).toBe(true);
       expect(isExamOpen(closedExam, now)).toBe(false);
+    });
+
+    test('isValidExamId correctly validates ObjectId and test formats', () => {
+      expect(isValidExamId('507f1f77bcf86cd799439011')).toBe(true);
+      expect(isValidExamId('exam1')).toBe(true);
+      expect(isValidExamId('invalid')).toBe(false);
+      expect(isValidExamId(null)).toBe(false);
+      expect(isValidExamId(123)).toBe(false);
     });
 
     test('validateExamInput rejects null or non-object body', () => {
