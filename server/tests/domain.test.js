@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const { selectQuestions, shuffle } = require('../src/domain');
+const { scoreAttempt } = require('../src/domain');
 
 describe('FR-005 / NFR-006: Question Selection and Shuffle Domain Logic', () => {
   const sampleQuestions = [
@@ -95,32 +97,23 @@ describe('FR-005 / NFR-006: Question Selection and Shuffle Domain Logic', () => 
       const questionWithOptions = [
         { id: 'q1', text: 'Q1', options: ['A', 'B', 'C', 'D', 'E', 'F', 'G'] },
       ];
-
-      let seenDifferent = false;
-      for (let i = 0; i < 20; i++) {
-        const result = selectQuestions(questionWithOptions, 1, { shuffleOptions: true });
-        if (result[0].options.join('') !== 'ABCDEFG') {
-          seenDifferent = true;
-          break;
-        }
-      }
-      expect(seenDifferent).toBe(true);
+      const result = selectQuestions(questionWithOptions, 1, { shuffleOptions: true, rng: () => 0 });
+      expect(result[0].options).toEqual(['B', 'C', 'D', 'E', 'F', 'G', 'A']);
     });
 
     test('produces randomized selections across multiple invocations', () => {
       const largePool = Array.from({ length: 20 }, (_, i) => ({ id: `q${i + 1}` }));
-      const order1 = selectQuestions(largePool, 10).map((q) => q.id).join(',');
-      let order2 = selectQuestions(largePool, 10).map((q) => q.id).join(',');
+      const first = selectQuestions(largePool, 10, { rng: seededRng(7) }).map((q) => q.id);
+      const repeated = selectQuestions(largePool, 10, { rng: seededRng(7) }).map((q) => q.id);
+      const otherSeed = selectQuestions(largePool, 10, { rng: seededRng(29) }).map((q) => q.id);
+      expect(repeated).toEqual(first);
+      expect(otherSeed).not.toEqual(first);
+    });
 
-      let randomized = false;
-      for (let i = 0; i < 10; i++) {
-        if (order1 !== order2) {
-          randomized = true;
-          break;
-        }
-        order2 = selectQuestions(largePool, 10).map((q) => q.id).join(',');
-      }
-      expect(randomized).toBe(true);
+    test('rejects invalid options and random source', () => {
+      expect(() => selectQuestions(sampleQuestions, 1, null)).toThrow('Options must be an object');
+      expect(() => selectQuestions(sampleQuestions, 1, { rng: 1 })).toThrow('Random source must be a function');
+      expect(() => selectQuestions(sampleQuestions, 2, { rng: () => 1 })).toThrow('Random source must return');
     });
   });
 
@@ -134,6 +127,62 @@ describe('FR-005 / NFR-006: Question Selection and Shuffle Domain Logic', () => 
       expect(() => shuffle(null)).toThrow(TypeError);
       expect(() => shuffle('string')).toThrow(TypeError);
     });
+
+    test('accepts an injectable random source and returns a deterministic permutation', () => {
+      expect(shuffle([1, 2, 3, 4], () => 0)).toEqual([2, 3, 4, 1]);
+    });
+
+    test('rejects random sources that return values outside [0, 1)', () => {
+      expect(() => shuffle([1, 2], () => -0.1)).toThrow(RangeError);
+      expect(() => shuffle([1, 2], () => NaN)).toThrow(RangeError);
+      expect(() => shuffle([1, 2], 'not a function')).toThrow(TypeError);
+    });
+  });
+
+  describe('scoreAttempt', () => {
+    const questions = [
+      { id: 'q1', options: ['A', 'B'], correctOption: 0 },
+      { id: 'q2', options: [{ optionId: 'q2-a' }, { optionId: 'q2-b' }], correctOption: 1 },
+      { id: 'q3', options: ['A', 'B'], correctOption: 1 },
+    ];
+
+    test('scores correct, wrong, and unanswered with negative marking disabled', () => {
+      expect(scoreAttempt(questions, { q1: 0, q2: 'q2-a' })).toEqual({
+        score: 1, correctCount: 1, incorrectCount: 1, unansweredCount: 1, maximumScore: 3,
+      });
+    });
+
+    test('applies configurable negative penalty and accepts answer records', () => {
+      expect(scoreAttempt(questions, [
+        { questionId: 'q1', optionId: '0' },
+        { questionId: 'q2', optionId: 'q2-b' },
+        { questionId: 'q3', optionId: 0 },
+      ], { negativeMarking: true, negativeMarkingPenalty: 0.25, pointsPerQuestion: 2 })).toEqual({
+        score: 3.75, correctCount: 2, incorrectCount: 1, unansweredCount: 0, maximumScore: 6,
+      });
+    });
+
+    test('counts a supplied but invalid option as incorrect and leaves score negative when penalty exceeds marks', () => {
+      expect(scoreAttempt([questions[0]], { q1: 'not-an-option' }, { negativeMarking: true, negativeMarkingPenalty: 2 }).score).toBe(-2);
+    });
+
+    test('handles empty attempts, null answers, alternate question identifiers and option object IDs', () => {
+      expect(scoreAttempt([], null)).toEqual({ score: 0, correctCount: 0, incorrectCount: 0, unansweredCount: 0, maximumScore: 0 });
+      expect(scoreAttempt([{ questionId: 'q', options: [{ id: 'a' }, { id: 'b' }], correctOption: 1 }], [{ questionId: 'q', answer: 'b' }]).correctCount).toBe(1);
+    });
+
+    test('validates question, answer, settings, and score configuration', () => {
+      expect(() => scoreAttempt(null, {})).toThrow(TypeError);
+      expect(() => scoreAttempt(questions, 'bad')).toThrow(TypeError);
+      expect(() => scoreAttempt(questions, {}, null)).toThrow(TypeError);
+      expect(() => scoreAttempt(questions, {}, { pointsPerQuestion: 0 })).toThrow(RangeError);
+      expect(() => scoreAttempt(questions, {}, { pointsPerQuestion: Infinity })).toThrow(RangeError);
+      expect(() => scoreAttempt(questions, {}, { negativeMarkingPenalty: -1 })).toThrow(RangeError);
+      expect(() => scoreAttempt(questions, {}, { negativeMarkingPenalty: NaN })).toThrow(RangeError);
+      expect(() => scoreAttempt([{ options: [], correctOption: 0 }], {})).toThrow('invalid options');
+      expect(() => scoreAttempt([{ options: ['A'], correctOption: -1 }], {})).toThrow('invalid options');
+      expect(() => scoreAttempt([{ options: ['A'], correctOption: 1 }], {})).toThrow('invalid options');
+    });
   });
 
   describe('NFR-006: Decoupling / Framework Independence', () => {
@@ -142,5 +191,32 @@ describe('FR-005 / NFR-006: Question Selection and Shuffle Domain Logic', () => 
       expect(fileContent).not.toMatch(/require\s*\(\s*['"]express['"]\s*\)/);
       expect(fileContent).not.toMatch(/require\s*\(\s*['"]mongoose['"]\s*\)/);
     });
+
+    test('can load and execute selection and scoring when Express and Mongoose imports are blocked', () => {
+      const modulePath = path.join(__dirname, '../src/domain.js');
+      const script = `
+        const Module = require('module');
+        const originalLoad = Module._load;
+        Module._load = function (request, parent, isMain) {
+          if (request === 'express' || request === 'mongoose') throw new Error('framework import: ' + request);
+          return originalLoad.call(this, request, parent, isMain);
+        };
+        const domain = require(${JSON.stringify(modulePath)});
+        const qs = [{id:'q',options:['a','b'],correctOption:1}];
+        if (domain.selectQuestions(qs, 1, {rng:()=>0}).length !== 1) process.exit(2);
+        if (domain.scoreAttempt(qs, {q:1}).score !== 1) process.exit(3);
+      `;
+      const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+    });
   });
 });
+
+function seededRng(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (1664525 * state + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}

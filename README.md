@@ -48,5 +48,21 @@ Agile (Scrum, 6 sprints). See `docs/` for the full SRS, SAD, STP and sprint plan
  
 ## Getting started
  
-Setup instructions will be added once the `client/` and `server/` scaffolding is in place (see their respective READMEs).
+For local development, start the API and student client in separate terminals:
+
+```bash
+cd server
+npm install
+cp .env.example .env
+npm run dev
+```
+
+```bash
+cd client
+npm install
+cp .env.example .env
+npm run dev
+```
+
+See [client/README.md](client/README.md) and [server/README.md](server/README.md) for details. The student client currently connects to authentication and available-exam APIs; attempt processing and result history require backend endpoints that are still pending.
  
