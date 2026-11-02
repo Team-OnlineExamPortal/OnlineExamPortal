@@ -6,6 +6,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 
 const { router: authRouter, authenticate, requireRole, ROLES } = require('./auth');
+const { router: examRouter } = require('./exams');
 const { notFound, errorHandler } = require('./errors');
 
 function requestId(req, res, next) {
@@ -28,17 +29,13 @@ function createApp() {
   // Auth/Admin module (FR-001, FR-002, SEC-001/002/004/006)
   app.use('/api/auth', authRouter);
 
-  // Placeholder admin-only route so FR-002 / TC-02 can be exercised today.
-  // Remove once real admin routes (POST /api/questions, POST /api/exams, ...)
-  // exist - they must be guarded the same way:
-  //   authenticate, requireRole(ROLES.ADMIN)
+  // Placeholder admin-only route for TC-02
   app.get('/api/admin/ping', authenticate, requireRole(ROLES.ADMIN), (req, res) =>
     res.json({ ok: true })
   );
 
-  // TEAMMATES: mount your routers here, e.g.
-  //   app.use('/api/questions', questionRouter);
-  //   app.use('/api/exams', examRouter);
+  // Exam Management module (FR-004, FR-006, SEC-002, SEC-003, SEC-005)
+  app.use('/api/exams', examRouter);
 
   app.use(notFound);
   app.use(errorHandler);
