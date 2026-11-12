@@ -22,9 +22,11 @@ jest.mock('../src/models', () => {
   const users = [];
   const exams = [];
   const questions = [];
+  const attempts = [];
   let userCounter = 0;
   let examCounter = 0;
   let questionCounter = 0;
+  let attemptCounter = 0;
 
   const ROLES = { STUDENT: 'Student', ADMIN: 'Administrator' };
   const USER_STATUS = { ACTIVE: 'active', DISABLED: 'disabled' };
@@ -62,16 +64,19 @@ jest.mock('../src/models', () => {
       });
     },
     async findById(id) {
-      // Simulate real Mongoose throwing CastError for malformed ObjectId
       const idStr = String(id);
       const isHexObjectId = /^[0-9a-fA-F]{24}$/.test(idStr);
       const isTestId = /^exam[0-9]+$/.test(idStr);
+
       if (!isHexObjectId && !isTestId) {
-        const err = new Error(`Cast to ObjectId failed for value "${idStr}" (type string) at path "_id" for model "Exam"`);
+        const err = new Error(
+          `Cast to ObjectId failed for value "${idStr}" (type string) at path "_id" for model "Exam"`
+        );
         err.name = 'CastError';
         err.kind = 'ObjectId';
         throw err;
       }
+
       return exams.find((e) => e.id === idStr || e._id === idStr) || null;
     },
   };
@@ -80,9 +85,29 @@ jest.mock('../src/models', () => {
     __store: questions,
     async create(doc) {
       questionCounter += 1;
-      const q = { id: `q${questionCounter}`, status: 'active', disabled: false, ...doc };
+      const q = {
+        id: `q${questionCounter}`,
+        _id: `q${questionCounter}`,
+        status: 'active',
+        disabled: false,
+        ...doc,
+      };
       questions.push(q);
       return q;
+    },
+    find(filter = {}) {
+      const ids = filter._id && Array.isArray(filter._id.$in)
+        ? filter._id.$in.map(String)
+        : null;
+
+      const result = questions.filter((q) => {
+        if (ids && !ids.includes(String(q._id || q.id))) return false;
+        if (filter.disabled && filter.disabled.$ne === true && q.disabled === true) return false;
+        if (filter.status && filter.status.$ne === 'disabled' && q.status === 'disabled') return false;
+        return true;
+      });
+
+      return { select: async () => result };
     },
     async countDocuments(filter = {}) {
       return questions.filter((q) => {
@@ -93,13 +118,44 @@ jest.mock('../src/models', () => {
     },
   };
 
-  return { User, Exam, Question, ROLES, USER_STATUS };
+  const Attempt = {
+    __store: attempts,
+    async create(doc) {
+      attemptCounter += 1;
+      const attempt = {
+        _id: `attempt${attemptCounter}`,
+        id: `attempt${attemptCounter}`,
+        ...doc,
+      };
+      attempts.push(attempt);
+      return attempt;
+    },
+    async findOne(query = {}) {
+      return attempts.find((a) => {
+        if (String(a.examId) !== String(query.examId)) return false;
+        if (String(a.studentId) !== String(query.studentId)) return false;
+        if (a.status !== query.status) return false;
+
+        if (query.startedAt && query.startedAt.$lte) {
+          if (new Date(a.startedAt) > new Date(query.startedAt.$lte)) return false;
+        }
+
+        if (query.expiresAt && query.expiresAt.$gt) {
+          if (new Date(a.expiresAt) <= new Date(query.expiresAt.$gt)) return false;
+        }
+
+        return true;
+      }) || null;
+    },
+  };
+
+  return { User, Exam, Question, Attempt, ROLES, USER_STATUS };
 });
 
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 const { createApp } = require('../src/app');
-const { User, Exam, Question, ROLES } = require('../src/models');
+const { User, Exam, Question, Attempt, ROLES } = require('../src/models');
 const { isExamOpen, validateExamInput, isValidExamId } = require('../src/exams');
 
 const app = createApp();
@@ -125,16 +181,17 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
       passwordHash: 'dummy',
       role: ROLES.ADMIN,
     });
+
     studentUser = await User.create({
       name: 'Student Alex',
       email: 'student@portal.test',
       passwordHash: 'dummy',
       role: ROLES.STUDENT,
     });
+
     adminToken = makeToken(adminUser);
     studentToken = makeToken(studentUser);
 
-    // Seed questions for category "DataStructures"
     for (let i = 1; i <= 5; i++) {
       await Question.create({
         text: `DS Question ${i}`,
@@ -199,6 +256,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
 
     test('rejects invalid window where startTime >= endTime with 400 INVALID_WINDOW', async () => {
       const now = Date.now();
+
       const res = await request(app)
         .post('/api/exams')
         .set('Authorization', `Bearer ${adminToken}`)
@@ -231,6 +289,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
           questionCount: 2,
           ...validDates,
         });
+
       expect(res1.status).toBe(400);
 
       const res2 = await request(app)
@@ -243,6 +302,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
           questionCount: -5,
           ...validDates,
         });
+
       expect(res2.status).toBe(400);
     });
 
@@ -254,7 +314,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
           title: 'Too Many Questions Exam',
           category: 'DataStructures',
           durationMinutes: 60,
-          questionCount: 999, // Category only has 5 questions
+          questionCount: 999,
           startTime: new Date().toISOString(),
           endTime: new Date(Date.now() + 3600000).toISOString(),
         });
@@ -280,7 +340,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
       expect(res.body.code).toBe('VALIDATION_ERROR');
     });
 
-    describe('Regression: Strict Date Validation (No Jan 1, 1970 null bypass)', () => {
+        describe('Regression: Strict Date Validation (No Jan 1, 1970 null bypass)', () => {
       test('rejects null startTime with 400 VALIDATION_ERROR', async () => {
         const res = await request(app)
           .post('/api/exams')
@@ -330,7 +390,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
   describe('GET /api/exams/available (FR-006, SEC-005)', () => {
     beforeAll(async () => {
       const now = Date.now();
-      // Past exam
+
       await Exam.create({
         title: 'Past Expired Exam',
         category: 'DataStructures',
@@ -339,7 +399,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
         startTime: new Date(now - 7200000),
         endTime: new Date(now - 3600000),
       });
-      // Future exam
+
       await Exam.create({
         title: 'Upcoming Future Exam',
         category: 'DataStructures',
@@ -348,7 +408,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
         startTime: new Date(now + 3600000),
         endTime: new Date(now + 7200000),
       });
-      // Active current exam
+
       await Exam.create({
         title: 'Currently Active Exam',
         category: 'DataStructures',
@@ -374,24 +434,26 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
     });
 
     test('Regression: ignores client ?now= parameter and strictly adheres to server clock', async () => {
-      // Client tries to pass a future time to view future exams
       const futureTime = new Date(Date.now() + 5000000).toISOString();
+
       const resFuture = await request(app)
         .get(`/api/exams/available?now=${futureTime}`)
         .set('Authorization', `Bearer ${studentToken}`);
 
       expect(resFuture.status).toBe(200);
+
       const futureTitles = resFuture.body.map((e) => e.title);
       expect(futureTitles).toContain('Currently Active Exam');
       expect(futureTitles).not.toContain('Upcoming Future Exam');
 
-      // Client tries to pass a past time to view expired exams
       const pastTime = new Date(Date.now() - 5000000).toISOString();
+
       const resPast = await request(app)
         .get(`/api/exams/available?now=${pastTime}`)
         .set('Authorization', `Bearer ${studentToken}`);
 
       expect(resPast.status).toBe(200);
+
       const pastTitles = resPast.body.map((e) => e.title);
       expect(pastTitles).toContain('Currently Active Exam');
       expect(pastTitles).not.toContain('Past Expired Exam');
@@ -403,6 +465,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
         .set('Authorization', `Bearer ${studentToken}`);
 
       expect(res.status).toBe(200);
+
       res.body.forEach((exam) => {
         expect(exam).not.toHaveProperty('questions');
         expect(exam).not.toHaveProperty('options');
@@ -412,6 +475,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
 
     test('rejects unauthenticated requests to available exams with 401', async () => {
       const res = await request(app).get('/api/exams/available');
+
       expect(res.status).toBe(401);
       expect(res.body.code).toBe('UNAUTHENTICATED');
     });
@@ -420,6 +484,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
   describe('GET /api/exams/:id', () => {
     test('returns exam metadata for a valid ID', async () => {
       const exam = Exam.__store[0];
+
       const res = await request(app)
         .get(`/api/exams/${exam.id}`)
         .set('Authorization', `Bearer ${studentToken}`);
@@ -446,7 +511,7 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
           '../../etc/passwd',
           'null',
           'undefined',
-          '507f1f77bcf86cd79943901z', // 24 chars but invalid hex 'z'
+          '507f1f77bcf86cd79943901z',
         ];
 
         for (const badId of malformedIds) {
@@ -461,13 +526,145 @@ describe('FR-004 & FR-006: Exam Management & Scheduling', () => {
     });
   });
 
+    describe('SEC-005: Secure question retrieval', () => {
+    let activeExam;
+    let selectedQuestionIds;
+
+    beforeAll(async () => {
+      activeExam = await Exam.create({
+        title: 'SEC-005 Protected Questions Exam',
+        category: 'DataStructures',
+        durationMinutes: 30,
+        questionCount: 2,
+        startTime: new Date(Date.now() - 60_000),
+        endTime: new Date(Date.now() + 600_000),
+      });
+
+      selectedQuestionIds = Question.__store
+        .slice(0, 2)
+        .map((question) => question._id);
+    });
+
+    beforeEach(() => {
+      Attempt.__store.length = 0;
+    });
+
+    async function createAttempt(overrides = {}) {
+      return Attempt.create({
+        studentId: studentUser.id,
+        examId: activeExam.id,
+        status: 'active',
+        startedAt: new Date(Date.now() - 60_000),
+        expiresAt: new Date(Date.now() + 600_000),
+        selectedQuestionIds,
+        ...overrides,
+      });
+    }
+
+    test('denies question retrieval when the student has no active attempt (403)', async () => {
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('ACTIVE_ATTEMPT_REQUIRED');
+    });
+
+    test('returns assigned questions for the owner of a valid active attempt without answer keys (200)', async () => {
+      await createAttempt();
+
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.examId).toBe(activeExam.id);
+      expect(res.body).toHaveProperty('attemptId');
+      expect(res.body.questions).toHaveLength(2);
+
+      expect(res.body.questions[0]).toEqual({
+        id: expect.any(String),
+        text: expect.any(String),
+        options: expect.any(Array),
+        category: expect.any(String),
+      });
+
+      res.body.questions.forEach((question) => {
+        expect(question).not.toHaveProperty('correctOption');
+      });
+    });
+
+    test('denies access when the active attempt belongs to another student (403)', async () => {
+      await createAttempt({ studentId: adminUser.id });
+
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(res.status).toBe(403);
+    });
+
+    test('denies access to a submitted attempt (403)', async () => {
+      await createAttempt({ status: 'submitted' });
+
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(res.status).toBe(403);
+    });
+
+    test('denies access to an expired attempt (403)', async () => {
+      await createAttempt({
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(res.status).toBe(403);
+    });
+
+    test('denies access when an Administrator requests student questions (403)', async () => {
+      await createAttempt();
+
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.status).toBe(403);
+    });
+
+    test('rejects unauthenticated question retrieval (401)', async () => {
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`);
+
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe('UNAUTHENTICATED');
+    });
+
+    test('denies an attempt with no assigned questions (403)', async () => {
+      await createAttempt({ selectedQuestionIds: [] });
+
+      const res = await request(app)
+        .get(`/api/exams/${activeExam.id}/questions`)
+        .set('Authorization', `Bearer ${studentToken}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('QUESTIONS_NOT_ASSIGNED');
+    });
+  });
+
   describe('Helper functions', () => {
     test('isExamOpen correctly verifies time bounds', () => {
       const now = new Date('2026-11-01T12:00:00Z');
+
       const openExam = {
         startTime: '2026-11-01T11:00:00Z',
         endTime: '2026-11-01T13:00:00Z',
       };
+
       const closedExam = {
         startTime: '2026-11-01T09:00:00Z',
         endTime: '2026-11-01T10:00:00Z',
