@@ -1,3 +1,4 @@
+
 'use strict';
 
 /**
@@ -20,8 +21,6 @@ const USER_STATUS = Object.freeze({
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 100 },
-    // FR-001: unique email. Stored lower-cased; the unique index is the final
-    // guard against two simultaneous registrations with the same address.
     email: {
       type: String,
       required: true,
@@ -30,17 +29,25 @@ const userSchema = new mongoose.Schema(
       trim: true,
       maxlength: 254,
     },
-    // SEC-001: only the bcrypt hash is ever stored.
     passwordHash: { type: String, required: true, select: true },
-    role: { type: String, enum: Object.values(ROLES), default: ROLES.STUDENT, required: true },
-    status: { type: String, enum: Object.values(USER_STATUS), default: USER_STATUS.ACTIVE },
+    role: {
+      type: String,
+      enum: Object.values(ROLES),
+      default: ROLES.STUDENT,
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: Object.values(USER_STATUS),
+      default: USER_STATUS.ACTIVE,
+    },
   },
   { timestamps: true }
 );
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 
-// FR-004: Exam management schema (SAD §3.5)
+// FR-004: Exam management schema
 const examSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 200 },
@@ -57,19 +64,73 @@ const examSchema = new mongoose.Schema(
 
 const Exam = mongoose.models.Exam || mongoose.model('Exam', examSchema);
 
-// FR-003: Question bank schema (SAD §3.5)
+// FR-003: Question bank schema
 const questionSchema = new mongoose.Schema(
   {
     text: { type: String, required: true, trim: true },
     options: [{ type: String, required: true }],
     correctOption: { type: Number, required: true },
     category: { type: String, required: true, trim: true },
-    status: { type: String, enum: Object.values(USER_STATUS), default: USER_STATUS.ACTIVE },
+    status: {
+      type: String,
+      enum: Object.values(USER_STATUS),
+      default: USER_STATUS.ACTIVE,
+    },
     disabled: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-const Question = mongoose.models.Question || mongoose.model('Question', questionSchema);
+const Question =
+  mongoose.models.Question || mongoose.model('Question', questionSchema);
 
-module.exports = { User, Exam, Question, ROLES, USER_STATUS };
+// SEC-005: An attempt authorizes a student to access assigned questions.
+const attemptSchema = new mongoose.Schema(
+  {
+    studentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+    examId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Exam',
+      required: true,
+      index: true,
+    },
+    status: {
+      type: String,
+      enum: ['active', 'submitted', 'expired'],
+      default: 'active',
+      required: true,
+    },
+    startedAt: {
+      type: Date,
+      required: true,
+    },
+    expiresAt: {
+      type: Date,
+      required: true,
+    },
+    selectedQuestionIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Question',
+      },
+    ],
+  },
+  { timestamps: true }
+);
+
+const Attempt =
+  mongoose.models.Attempt || mongoose.model('Attempt', attemptSchema);
+
+module.exports = {
+  User,
+  Exam,
+  Question,
+  Attempt,
+  ROLES,
+  USER_STATUS,
+};
