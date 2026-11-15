@@ -328,10 +328,9 @@ router.get(
       );
     }
 
+    // Disabling a question excludes it from new selections, not an existing attempt.
     const questions = await Question.find({
       _id: { $in: selectedIds },
-      disabled: { $ne: true },
-      status: { $ne: 'disabled' },
     }).select('_id text options category');
 
     if (questions.length !== selectedIds.length) {

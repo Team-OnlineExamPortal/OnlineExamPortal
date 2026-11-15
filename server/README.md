@@ -1,5 +1,19 @@
 # Server (Node.js / Express Backend)
 
+## Question bank (FR-003)
+
+Use an administrator bearer token for these endpoints:
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /api/questions` | List questions, optionally filtered by an exact `category` query parameter. |
+| `POST /api/questions` | Create an active question. |
+| `PUT /api/questions/:id` | Replace a question's content and category without changing its status. |
+| `PATCH /api/questions/:id/disable` | Disable a question for future selection while keeping it available to attempts already assigned it. |
+
+Create and edit require `text`, `category`, `options` (2 to 10 strings), and
+`correctOption` (the zero-based index of the correct option).
+
 This folder will hold the Express API.
 
 ## To initialize

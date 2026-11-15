@@ -7,6 +7,7 @@ const helmet = require('helmet');
 
 const { router: authRouter, authenticate, requireRole, ROLES } = require('./auth');
 const { router: examRouter } = require('./exams');
+const { router: questionRouter } = require('./questions');
 const { notFound, errorHandler } = require('./errors');
 
 function requestId(req, res, next) {
@@ -36,6 +37,7 @@ function createApp() {
 
   // Exam Management module (FR-004, FR-006, SEC-002, SEC-003, SEC-005)
   app.use('/api/exams', examRouter);
+  app.use('/api/questions', questionRouter);
 
   app.use(notFound);
   app.use(errorHandler);
