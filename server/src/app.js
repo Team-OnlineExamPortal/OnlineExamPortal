@@ -8,6 +8,7 @@ const helmet = require('helmet');
 const { router: authRouter, authenticate, requireRole, ROLES } = require('./auth');
 const { router: examRouter } = require('./exams');
 const { notFound, errorHandler } = require('./errors');
+const { rejectUnsafeInput } = require('./input');
 
 function requestId(req, res, next) {
   req.id = crypto.randomUUID();
@@ -23,6 +24,7 @@ function createApp() {
   app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
   app.use(requestId);
   app.use(express.json({ limit: '100kb' }));
+  app.use(rejectUnsafeInput);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
