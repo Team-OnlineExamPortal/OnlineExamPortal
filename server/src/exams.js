@@ -57,7 +57,12 @@ function validateExamInput(body) {
     endTime,
     category,
     questionCount,
+    negativeMarking = false,
   } = body || {};
+
+  if (typeof negativeMarking !== 'boolean') {
+    throw new HttpError(400, 'VALIDATION_ERROR', 'negativeMarking must be a boolean');
+  }
 
   if (!isString(title) || !title.trim() || title.trim().length > 200) {
     throw new HttpError(
@@ -138,7 +143,7 @@ function validateExamInput(body) {
     questionCount,
     startTime: start,
     endTime: end,
-    negativeMarking: Boolean(body.negativeMarking),
+    negativeMarking,
   };
 }
 

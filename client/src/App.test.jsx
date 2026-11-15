@@ -44,6 +44,22 @@ beforeEach(() => {
 afterEach(() => { cleanup(); });
 
 describe('student portal journey (NFR-003)', () => {
+  it('renders HTML-like question content as text', async () => {
+    const user = userEvent.setup();
+    const text = '<iframe title="untrusted question content"></iframe>';
+    examApi.start.mockResolvedValue({
+      ...attempt,
+      questions: [{ ...attempt.questions[0], text }],
+    });
+    renderApp();
+    await user.type(await screen.findByLabelText('Email address'), 'satyam@example.test');
+    await user.type(screen.getByLabelText('Password'), 'safe-password');
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.click(await screen.findByRole('link', { name: /start exam/i }));
+    expect(await screen.findByRole('heading', { name: text })).toBeTruthy();
+    expect(screen.queryByTitle('untrusted question content')).toBeNull();
+  });
+
   it('signs in, starts an available exam in one dashboard click, navigates, saves answers and review state, submits, and views history', async () => {
     const user = userEvent.setup();
     const confirm = vi.fn(() => true);
