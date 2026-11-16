@@ -1,4 +1,3 @@
-
 'use strict';
 
 /**
@@ -84,7 +83,7 @@ const questionSchema = new mongoose.Schema(
 const Question =
   mongoose.models.Question || mongoose.model('Question', questionSchema);
 
-// SEC-005: An attempt authorizes a student to access assigned questions.
+// SEC-005 & FR-007: An attempt authorizes a student to access assigned questions.
 const attemptSchema = new mongoose.Schema(
   {
     studentId: {
@@ -119,6 +118,22 @@ const attemptSchema = new mongoose.Schema(
         ref: 'Question',
       },
     ],
+    questions: [
+      {
+        id: String,
+        questionId: String,
+        text: String,
+        options: [mongoose.Schema.Types.Mixed],
+      },
+    ],
+    answers: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    reviews: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
   },
   { timestamps: true }
 );
