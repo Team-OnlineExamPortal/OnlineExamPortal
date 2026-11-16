@@ -4,6 +4,7 @@
  * Exam Attempt processing module (Samrudh C Patil - PES1UG24CS417)
  *
  *   FR-007   Provide timed attempts with remaining time shown
+ *   FR-011   Prevent two active attempts by one student for the same exam
  *   SEC-002  Enforce student-only access to exam taking
  *   SEC-005  Never expose correctOption or questions before active attempt
  */
@@ -27,7 +28,7 @@ function isValidId(id) {
 }
 
 /**
- * FR-007 / SEC-005: Start a timed attempt for an exam.
+ * FR-007 / FR-011 / SEC-005: Start a timed attempt for an exam.
  * POST /api/exams/:id/attempts
  */
 examAttemptRouter.post(
@@ -62,6 +63,31 @@ examAttemptRouter.post(
     const examEnd = new Date(exam.endTime);
     if (now < examStart || now > examEnd) {
       throw new HttpError(403, 'EXAM_NOT_ACTIVE', 'Exam window is not currently active');
+    }
+
+    // FR-011: Prevent two active attempts by the same student for the same exam
+    if (Attempt && typeof Attempt.findOne === 'function') {
+      const existingAttempt = await Attempt.findOne({
+        studentId: req.user.userId,
+        examId: exam._id || exam.id,
+        status: 'active',
+      });
+
+      if (existingAttempt) {
+        // If the existing active attempt has passed its deadline, transition to expired
+        if (now > new Date(existingAttempt.expiresAt)) {
+          existingAttempt.status = 'expired';
+          if (typeof existingAttempt.save === 'function') {
+            await existingAttempt.save();
+          }
+        } else {
+          throw new HttpError(
+            409,
+            'ACTIVE_ATTEMPT_EXISTS',
+            'An active attempt is already in progress for this exam'
+          );
+        }
+      }
     }
 
     // Fetch active questions for the category
@@ -99,17 +125,29 @@ examAttemptRouter.post(
       options: q.options,
     }));
 
-    const attempt = await Attempt.create({
-      studentId: req.user.userId,
-      examId: exam._id || exam.id,
-      status: 'active',
-      startedAt,
-      expiresAt,
-      selectedQuestionIds: questionSnapshots.map((q) => q.id),
-      questions: questionSnapshots,
-      answers: {},
-      reviews: {},
-    });
+    let attempt;
+    try {
+      attempt = await Attempt.create({
+        studentId: req.user.userId,
+        examId: exam._id || exam.id,
+        status: 'active',
+        startedAt,
+        expiresAt,
+        selectedQuestionIds: questionSnapshots.map((q) => q.id),
+        questions: questionSnapshots,
+        answers: {},
+        reviews: {},
+      });
+    } catch (err) {
+      if (err.code === 11000) {
+        throw new HttpError(
+          409,
+          'ACTIVE_ATTEMPT_EXISTS',
+          'An active attempt is already in progress for this exam'
+        );
+      }
+      throw err;
+    }
 
     res.status(201).json({
       id: attempt._id || attempt.id,

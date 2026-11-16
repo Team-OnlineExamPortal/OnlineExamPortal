@@ -138,6 +138,12 @@ const attemptSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// FR-011: Prevent two active attempts by one student for the same exam
+attemptSchema.index(
+  { studentId: 1, examId: 1 },
+  { unique: true, partialFilterExpression: { status: 'active' } }
+);
+
 const Attempt =
   mongoose.models.Attempt || mongoose.model('Attempt', attemptSchema);
 
