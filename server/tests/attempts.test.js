@@ -4,6 +4,8 @@
  * Tests for Exam Attempt processing module:
  *   TC-06 / FR-007   Provide timed attempts with remaining time shown
  *   FR-011           Prevent two active attempts by one student for the same exam
+ *   FR-009           Automatically save selected answers during an active exam
+ *   FR-008           Allow navigation and mark for review
  *   SEC-002          Role-based access: Student-only access to start attempt
  *   SEC-005          Ensure questions returned in attempt never expose correctOption
  */
@@ -109,10 +111,13 @@ jest.mock('../src/models', () => {
       const attempt = {
         id: `attempt${attemptCounter}`,
         _id: `attempt${attemptCounter}`,
+        answers: {},
+        reviews: {},
         ...doc,
         async save() {
           return this;
         },
+        markModified() {},
       };
       attempts.push(attempt);
       return attempt;
@@ -147,7 +152,7 @@ function makeToken(user) {
   );
 }
 
-describe('FR-007 / FR-011 / SEC-005: Timed Exam Attempts & Active Attempt Guard', () => {
+describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt Guard & Auto-Save', () => {
   let student1, student2, admin;
   let student1Token, student2Token, adminToken;
   let activeExam, futureExam, expiredExam, shortWindowExam;
@@ -425,6 +430,167 @@ describe('FR-007 / FR-011 / SEC-005: Timed Exam Attempts & Active Attempt Guard'
 
       expect(res.status).toBe(404);
       expect(res.body.code).toBe('NOT_FOUND');
+    });
+  });
+
+  describe('PUT /api/attempts/:id/answers (FR-009 / FR-008: Auto-Save Answers & Review Flags)', () => {
+    let saveAttemptId, qId1, qId2;
+
+    beforeAll(async () => {
+      const examForSave = await Exam.create({
+        title: 'Auto-Save Test Exam',
+        category: 'Algorithms',
+        durationMinutes: 45,
+        questionCount: 3,
+        startTime: new Date(Date.now() - 10000),
+        endTime: new Date(Date.now() + 3600000),
+      });
+
+      const res = await request(app)
+        .post(`/api/exams/${examForSave.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      saveAttemptId = res.body.attemptId;
+      qId1 = res.body.questions[0].id;
+      qId2 = res.body.questions[1].id;
+    });
+
+    test('successfully saves an answer choice for a question (200)', async () => {
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: qId1,
+          optionId: '1',
+          review: false,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
+      expect(res.body).toHaveProperty('savedAt');
+      expect(res.body.answers[qId1]).toBe('1');
+      expect(res.body.reviews[qId1]).toBe(false);
+    });
+
+    test('updates review mark for a question without altering the answer (FR-008)', async () => {
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: qId1,
+          review: true,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.answers[qId1]).toBe('1');
+      expect(res.body.reviews[qId1]).toBe(true);
+    });
+
+    test('supports saving multiple distinct questions independently', async () => {
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: qId2,
+          optionId: '3',
+          review: false,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.answers[qId1]).toBe('1');
+      expect(res.body.answers[qId2]).toBe('3');
+    });
+
+    test('idempotently overrides prior answer choice (last-write-wins)', async () => {
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: qId1,
+          optionId: '2',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.answers[qId1]).toBe('2');
+    });
+
+    test('clears answer when optionId is null', async () => {
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: qId1,
+          optionId: null,
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.answers[qId1]).toBeUndefined();
+    });
+
+    test('rejects save attempt from unauthorized student with 403 FORBIDDEN', async () => {
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student2Token}`)
+        .send({
+          questionId: qId1,
+          optionId: '1',
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('FORBIDDEN');
+    });
+
+    test('rejects save when questionId does not belong to the attempt with 400 VALIDATION_ERROR', async () => {
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: 'foreign-question-id',
+          optionId: '0',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    test('rejects save when attempt has expired with 409 ATTEMPT_EXPIRED', async () => {
+      const stored = Attempt.__store.find((a) => a.id === saveAttemptId);
+      const originalExpiresAt = stored.expiresAt;
+      // Expire the attempt
+      stored.expiresAt = new Date(Date.now() - 5000);
+
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: qId2,
+          optionId: '1',
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('ATTEMPT_EXPIRED');
+
+      // Restore expiresAt
+      stored.expiresAt = originalExpiresAt;
+      stored.status = 'active';
+    });
+
+    test('rejects save when attempt status is not active (e.g. submitted) with 409 ATTEMPT_CLOSED', async () => {
+      const stored = Attempt.__store.find((a) => a.id === saveAttemptId);
+      stored.status = 'submitted';
+
+      const res = await request(app)
+        .put(`/api/attempts/${saveAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: qId2,
+          optionId: '1',
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('ATTEMPT_CLOSED');
+
+      stored.status = 'active';
     });
   });
 });
