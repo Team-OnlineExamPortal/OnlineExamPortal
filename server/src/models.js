@@ -134,6 +134,9 @@ const attemptSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
+    submittedAt: {
+      type: Date,
+    },
   },
   { timestamps: true }
 );

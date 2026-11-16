@@ -7,6 +7,7 @@
  *   FR-011   Prevent two active attempts by one student for the same exam
  *   FR-009   Automatically save selected answers during an active exam
  *   FR-008   Allow navigation and mark for review
+ *   FR-010   Automatically submit exam attempt on deadline or explicit submit
  *   SEC-002  Enforce student-only access to exam taking
  *   SEC-005  Never expose correctOption or questions before active attempt
  */
@@ -202,6 +203,13 @@ attemptRouter.get(
     }
 
     const now = new Date();
+    if (attempt.status === 'active' && now > new Date(attempt.expiresAt)) {
+      attempt.status = 'expired';
+      attempt.submittedAt = new Date(attempt.expiresAt);
+      if (typeof attempt.save === 'function') {
+        await attempt.save();
+      }
+    }
     const remainingSeconds = Math.max(0, Math.floor((new Date(attempt.expiresAt).getTime() - now.getTime()) / 1000));
 
     // Ensure questions omit correctOption
@@ -341,6 +349,75 @@ attemptRouter.put(
       questionId: trimmedQuestionId,
       answers: attempt.answers,
       reviews: attempt.reviews,
+    });
+  })
+);
+
+/**
+ * FR-010: Explicit submit or timer auto-submit at deadline.
+ * POST /api/attempts/:id/submit
+ */
+attemptRouter.post(
+  '/:id/submit',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const attemptId = req.params.id;
+    if (!isValidId(attemptId)) {
+      throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+    }
+
+    let attempt = null;
+    if (Attempt && typeof Attempt.findById === 'function') {
+      try {
+        attempt = await Attempt.findById(attemptId);
+      } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+          throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+        }
+        throw err;
+      }
+    }
+
+    if (!attempt) {
+      throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+    }
+
+    // Ownership check: only the student who owns the attempt can submit
+    if (String(attempt.studentId) !== String(req.user.userId)) {
+      throw new HttpError(403, 'FORBIDDEN', 'Access denied to this attempt');
+    }
+
+    // Idempotent submission: if already submitted, return existing submission
+    if (attempt.status === 'submitted') {
+      return res.status(200).json({
+        status: 'submitted',
+        attemptId: attempt._id || attempt.id,
+        examId: attempt.examId,
+        studentId: attempt.studentId,
+        submittedAt: attempt.submittedAt || attempt.updatedAt,
+        alreadySubmitted: true,
+      });
+    }
+
+    const now = new Date();
+    const isExpired = now > new Date(attempt.expiresAt);
+
+    // Finalize status: marked submitted
+    attempt.status = 'submitted';
+    attempt.submittedAt = isExpired ? new Date(attempt.expiresAt) : now;
+
+    if (typeof attempt.save === 'function') {
+      await attempt.save();
+    }
+
+    res.status(200).json({
+      status: 'submitted',
+      attemptId: attempt._id || attempt.id,
+      examId: attempt.examId,
+      studentId: attempt.studentId,
+      submittedAt: attempt.submittedAt,
+      autoSubmitted: isExpired,
+      answersCount: Object.keys(attempt.answers || {}).length,
     });
   })
 );
