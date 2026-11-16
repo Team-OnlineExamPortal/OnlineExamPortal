@@ -5,6 +5,8 @@
  *
  *   FR-007   Provide timed attempts with remaining time shown
  *   FR-011   Prevent two active attempts by one student for the same exam
+ *   FR-009   Automatically save selected answers during an active exam
+ *   FR-008   Allow navigation and mark for review
  *   SEC-002  Enforce student-only access to exam taking
  *   SEC-005  Never expose correctOption or questions before active attempt
  */
@@ -222,6 +224,123 @@ attemptRouter.get(
       questions: sanitizedQuestions,
       answers: attempt.answers || {},
       reviews: attempt.reviews || {},
+    });
+  })
+);
+
+/**
+ * FR-009 / FR-008: Save student answer choice and review flag during an active attempt.
+ * PUT /api/attempts/:id/answers
+ */
+attemptRouter.put(
+  '/:id/answers',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const attemptId = req.params.id;
+    if (!isValidId(attemptId)) {
+      throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+    }
+
+    let attempt = null;
+    if (Attempt && typeof Attempt.findById === 'function') {
+      try {
+        attempt = await Attempt.findById(attemptId);
+      } catch (err) {
+        if (err.name === 'CastError' || err.kind === 'ObjectId') {
+          throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+        }
+        throw err;
+      }
+    }
+
+    if (!attempt) {
+      throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+    }
+
+    // Ownership check: only the student who owns the attempt can save answers
+    if (String(attempt.studentId) !== String(req.user.userId)) {
+      throw new HttpError(403, 'FORBIDDEN', 'Access denied to this attempt');
+    }
+
+    // Status check
+    if (attempt.status !== 'active') {
+      throw new HttpError(
+        409,
+        'ATTEMPT_CLOSED',
+        `Cannot save answers to an attempt with status "${attempt.status}"`
+      );
+    }
+
+    // Timer deadline check (server clock)
+    const now = new Date();
+    if (now > new Date(attempt.expiresAt)) {
+      attempt.status = 'expired';
+      if (typeof attempt.save === 'function') {
+        await attempt.save();
+      }
+      throw new HttpError(409, 'ATTEMPT_EXPIRED', 'Exam deadline has expired');
+    }
+
+    // Input validation
+    const { questionId, optionId, review } = req.body || {};
+    if (!isString(questionId) || !questionId.trim()) {
+      throw new HttpError(400, 'VALIDATION_ERROR', 'questionId is required');
+    }
+
+    const trimmedQuestionId = questionId.trim();
+
+    // Verify question belongs to this attempt's snapshot
+    const questionExists =
+      (attempt.questions || []).some(
+        (q) => String(q.id || q.questionId || q._id) === trimmedQuestionId
+      ) ||
+      (attempt.selectedQuestionIds || []).some(
+        (qid) => String(qid) === trimmedQuestionId
+      );
+
+    if (!questionExists) {
+      throw new HttpError(
+        400,
+        'VALIDATION_ERROR',
+        'Question does not belong to this attempt'
+      );
+    }
+
+    if (!attempt.answers) attempt.answers = {};
+    if (!attempt.reviews) attempt.reviews = {};
+
+    // Save selected answer choice (or remove if cleared with null)
+    if (optionId !== undefined) {
+      if (optionId === null) {
+        delete attempt.answers[trimmedQuestionId];
+      } else {
+        attempt.answers[trimmedQuestionId] = String(optionId);
+      }
+    }
+
+    // Save review mark if provided
+    if (review !== undefined) {
+      attempt.reviews[trimmedQuestionId] = Boolean(review);
+    }
+
+    if (typeof attempt.markModified === 'function') {
+      attempt.markModified('answers');
+      attempt.markModified('reviews');
+    }
+
+    if (typeof attempt.save === 'function') {
+      await attempt.save();
+    }
+
+    const savedAt = now.toISOString();
+
+    res.status(200).json({
+      status: 'ok',
+      savedAt,
+      attemptId: attempt._id || attempt.id,
+      questionId: trimmedQuestionId,
+      answers: attempt.answers,
+      reviews: attempt.reviews,
     });
   })
 );
