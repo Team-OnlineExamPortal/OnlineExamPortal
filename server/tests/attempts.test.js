@@ -3,6 +3,7 @@
 /**
  * Tests for Exam Attempt processing module:
  *   TC-06 / FR-007   Provide timed attempts with remaining time shown
+ *   FR-011           Prevent two active attempts by one student for the same exam
  *   SEC-002          Role-based access: Student-only access to start attempt
  *   SEC-005          Ensure questions returned in attempt never expose correctOption
  */
@@ -82,9 +83,37 @@ jest.mock('../src/models', () => {
 
   const Attempt = {
     __store: attempts,
+    async findOne(query = {}) {
+      return attempts.find((a) => {
+        if (query.studentId && String(a.studentId) !== String(query.studentId)) return false;
+        if (query.examId && String(a.examId) !== String(query.examId)) return false;
+        if (query.status && a.status !== query.status) return false;
+        return true;
+      }) || null;
+    },
     async create(doc) {
+      if (doc.status === 'active') {
+        const dup = attempts.find(
+          (a) =>
+            String(a.studentId) === String(doc.studentId) &&
+            String(a.examId) === String(doc.examId) &&
+            a.status === 'active'
+        );
+        if (dup) {
+          const err = new Error('E11000 duplicate key error');
+          err.code = 11000;
+          throw err;
+        }
+      }
       attemptCounter += 1;
-      const attempt = { id: `attempt${attemptCounter}`, _id: `attempt${attemptCounter}`, ...doc };
+      const attempt = {
+        id: `attempt${attemptCounter}`,
+        _id: `attempt${attemptCounter}`,
+        ...doc,
+        async save() {
+          return this;
+        },
+      };
       attempts.push(attempt);
       return attempt;
     },
@@ -118,7 +147,7 @@ function makeToken(user) {
   );
 }
 
-describe('FR-007 / SEC-005: Timed Exam Attempts', () => {
+describe('FR-007 / FR-011 / SEC-005: Timed Exam Attempts & Active Attempt Guard', () => {
   let student1, student2, admin;
   let student1Token, student2Token, adminToken;
   let activeExam, futureExam, expiredExam, shortWindowExam;
@@ -197,8 +226,17 @@ describe('FR-007 / SEC-005: Timed Exam Attempts', () => {
     });
 
     test('SEC-005: questions in attempt payload never include correctOption', async () => {
+      const examForSec = await Exam.create({
+        title: 'SEC Test Exam',
+        category: 'Algorithms',
+        durationMinutes: 20,
+        questionCount: 3,
+        startTime: new Date(Date.now() - 10000),
+        endTime: new Date(Date.now() + 3600000),
+      });
+
       const res = await request(app)
-        .post(`/api/exams/${activeExam.id}/attempts`)
+        .post(`/api/exams/${examForSec.id}/attempts`)
         .set('Authorization', `Bearer ${student1Token}`);
 
       expect(res.status).toBe(201);
@@ -262,12 +300,86 @@ describe('FR-007 / SEC-005: Timed Exam Attempts', () => {
     });
   });
 
+  describe('FR-011: Prevent multiple active attempts per student per exam', () => {
+    test('rejects second attempt while first attempt is active with 409 ACTIVE_ATTEMPT_EXISTS', async () => {
+      // student1 already has an active attempt on activeExam from previous test
+      const res = await request(app)
+        .post(`/api/exams/${activeExam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('ACTIVE_ATTEMPT_EXISTS');
+    });
+
+    test('allows different students to have active attempts for the same exam concurrently', async () => {
+      const res = await request(app)
+        .post(`/api/exams/${activeExam.id}/attempts`)
+        .set('Authorization', `Bearer ${student2Token}`);
+
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('active');
+    });
+
+    test('allows a student to start an attempt on a different exam concurrently', async () => {
+      const anotherExam = await Exam.create({
+        title: 'Concurrent Different Exam',
+        category: 'Algorithms',
+        durationMinutes: 15,
+        questionCount: 3,
+        startTime: new Date(Date.now() - 10000),
+        endTime: new Date(Date.now() + 3600000),
+      });
+
+      const res = await request(app)
+        .post(`/api/exams/${anotherExam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(201);
+    });
+
+    test('allows new attempt if previous attempt on same exam has expired', async () => {
+      const expiryExam = await Exam.create({
+        title: 'Expiry Test Exam',
+        category: 'Algorithms',
+        durationMinutes: 10,
+        questionCount: 2,
+        startTime: new Date(Date.now() - 100000),
+        endTime: new Date(Date.now() + 3600000),
+      });
+
+      // Start attempt 1
+      const res1 = await request(app)
+        .post(`/api/exams/${expiryExam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+      expect(res1.status).toBe(201);
+
+      // Fast forward: expire attempt 1
+      const stored = Attempt.__store.find((a) => a.id === res1.body.attemptId);
+      stored.expiresAt = new Date(Date.now() - 1000);
+
+      // Start attempt 2 -> allowed because previous active attempt expired
+      const res2 = await request(app)
+        .post(`/api/exams/${expiryExam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res2.status).toBe(201);
+    });
+  });
+
   describe('GET /api/attempts/:id (Get Attempt State)', () => {
     let attemptId;
 
     beforeAll(async () => {
+      const examForGet = await Exam.create({
+        title: 'Get Attempt Exam',
+        category: 'Algorithms',
+        durationMinutes: 25,
+        questionCount: 3,
+        startTime: new Date(Date.now() - 10000),
+        endTime: new Date(Date.now() + 3600000),
+      });
       const res = await request(app)
-        .post(`/api/exams/${activeExam.id}/attempts`)
+        .post(`/api/exams/${examForGet.id}/attempts`)
         .set('Authorization', `Bearer ${student1Token}`);
       attemptId = res.body.attemptId;
     });
@@ -282,7 +394,7 @@ describe('FR-007 / SEC-005: Timed Exam Attempts', () => {
       expect(res.body.status).toBe('active');
       expect(res.body).toHaveProperty('remainingSeconds');
       expect(res.body).toHaveProperty('deadline');
-      expect(res.body.questions).toHaveLength(5);
+      expect(res.body.questions).toHaveLength(3);
       res.body.questions.forEach((q) => {
         expect(q).not.toHaveProperty('correctOption');
       });
