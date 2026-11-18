@@ -12,6 +12,10 @@ const { attemptRouter, examAttemptRouter } = require('./attempts');
 const { notFound, errorHandler } = require('./errors');
 const { rejectUnsafeInput } = require('./input');
 const { router: submissionRouter } = require('./submissions');
+const { router: resultRouter } = require('./results');
+const { router: reportRouter } = require('./reports');
+const mongoose = require('mongoose');
+const { asyncHandler } = require('./errors');
 
 function requestId(req, res, next) {
   req.id = crypto.randomUUID();
@@ -30,6 +34,15 @@ function createApp() {
   app.use(rejectUnsafeInput);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+  app.get('/api/ready', asyncHandler(async (req, res) => {
+    if (mongoose.connection.readyState !== 1) return res.status(503).json({ status: 'unavailable' });
+    try {
+      await mongoose.connection.db.command({ ping: 1 }, { timeoutMS: 3000 });
+      return res.json({ status: 'ok' });
+    } catch {
+      return res.status(503).json({ status: 'unavailable' });
+    }
+  }));
 
   // Auth/Admin module (FR-001, FR-002, SEC-001/002/004/006)
   app.use('/api/auth', authRouter);
@@ -42,6 +55,8 @@ function createApp() {
   // Exam Management module (FR-004, FR-006, SEC-002, SEC-003, SEC-005)
   app.use('/api/exams', examRouter);
   app.use('/api/questions', questionRouter);
+  app.use('/api/results', resultRouter);
+  app.use('/api/reports', reportRouter);
 
   // Exam Attempt processing module (FR-007, SEC-002, SEC-005)
   app.use('/api/exams', examAttemptRouter);
