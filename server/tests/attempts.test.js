@@ -85,6 +85,12 @@ jest.mock('../src/models', () => {
 
   const Attempt = {
     __store: attempts,
+    async findOneAndUpdate(query, update) {
+      const attempt = attempts.find((a) => String(a.id) === String(query._id));
+      if (!attempt || attempt.status !== query.status || attempt.result) return null;
+      Object.assign(attempt, update.$set);
+      return attempt;
+    },
     async findOne(query = {}) {
       return attempts.find((a) => {
         if (query.studentId && String(a.studentId) !== String(query.studentId)) return false;

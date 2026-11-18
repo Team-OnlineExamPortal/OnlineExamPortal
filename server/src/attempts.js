@@ -338,9 +338,13 @@ attemptRouter.put(
       attempt.markModified('reviews');
     }
 
-    if (typeof attempt.save === 'function') {
-      await attempt.save();
-    }
+    const saved = await Attempt.findOneAndUpdate(
+      { _id: attempt._id || attempt.id, __v: attempt.__v, status: 'active',
+        expiresAt: { $gt: new Date() }, result: { $exists: false } },
+      { $set: { answers: attempt.answers, reviews: attempt.reviews }, $inc: { __v: 1 } },
+      { new: true }
+    );
+    if (!saved) throw new HttpError(409, 'ATTEMPT_CHANGED', 'Attempt changed or closed; reload before saving');
 
     const savedAt = now.toISOString();
 

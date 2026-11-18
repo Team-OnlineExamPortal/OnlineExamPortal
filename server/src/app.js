@@ -11,6 +11,7 @@ const { router: questionRouter } = require('./questions');
 const { attemptRouter, examAttemptRouter } = require('./attempts');
 const { notFound, errorHandler } = require('./errors');
 const { rejectUnsafeInput } = require('./input');
+const { router: submissionRouter } = require('./submissions');
 
 function requestId(req, res, next) {
   req.id = crypto.randomUUID();
@@ -44,6 +45,7 @@ function createApp() {
 
   // Exam Attempt processing module (FR-007, SEC-002, SEC-005)
   app.use('/api/exams', examAttemptRouter);
+  app.use('/api/attempts', submissionRouter);
   app.use('/api/attempts', attemptRouter);
 
   app.use(notFound);
