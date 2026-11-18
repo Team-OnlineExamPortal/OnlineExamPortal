@@ -850,4 +850,105 @@ describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt
       expect(res.body.code).toBe('NOT_FOUND');
     });
   });
+
+  describe('NFR-004: Student Reconnect Recovery (< 1 min State Restoration)', () => {
+    let reconnectExam;
+    let reconnectAttemptId;
+    let qIds;
+
+    beforeEach(async () => {
+      reconnectExam = await Exam.create({
+        title: 'NFR-004 Reconnect Exam',
+        category: 'Algorithms',
+        durationMinutes: 30,
+        startTime: new Date(Date.now() - 5 * 60 * 1000),
+        endTime: new Date(Date.now() + 60 * 60 * 1000),
+        questionCount: 3,
+        rules: { questionCount: 3 },
+        status: 'published',
+      });
+
+      const startRes = await request(app)
+        .post(`/api/exams/${reconnectExam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      reconnectAttemptId = startRes.body.attemptId;
+      qIds = startRes.body.questions.map((q) => q.id);
+
+      // Save an initial answer and a review mark before simulated disconnect
+      await request(app)
+        .put(`/api/attempts/${reconnectAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: qIds[0], optionId: '1', review: false });
+
+      await request(app)
+        .put(`/api/attempts/${reconnectAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: qIds[1], review: true });
+    });
+
+    test('reconnects and restores complete attempt state without data loss', async () => {
+      // Simulate client re-establishing connection and fetching saved attempt
+      const res = await request(app)
+        .get(`/api/attempts/${reconnectAttemptId}`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.attemptId).toBe(reconnectAttemptId);
+      expect(res.body.status).toBe('active');
+      expect(res.body.remainingSeconds).toBeGreaterThan(0);
+
+      // Snapshot order and question content are identical
+      expect(res.body.questions.map((q) => q.id)).toEqual(qIds);
+
+      // Answers and review flags are completely restored
+      expect(res.body.answers[qIds[0]]).toBe('1');
+      expect(res.body.reviews[qIds[1]]).toBe(true);
+      expect(res.body.answers[qIds[2]]).toBeUndefined();
+    });
+
+    test('replays and merges offline retry-queue answers upon reconnection', async () => {
+      // Simulate offline retry queue replaying question 2 answer and updating question 0
+      const replayRes1 = await request(app)
+        .put(`/api/attempts/${reconnectAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: qIds[2], optionId: '3', review: false });
+
+      expect(replayRes1.status).toBe(200);
+      expect(replayRes1.body.answers[qIds[2]]).toBe('3');
+
+      // Verify merged state on server
+      const getRes = await request(app)
+        .get(`/api/attempts/${reconnectAttemptId}`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(getRes.body.answers[qIds[0]]).toBe('1');
+      expect(getRes.body.reviews[qIds[1]]).toBe(true);
+      expect(getRes.body.answers[qIds[2]]).toBe('3');
+    });
+
+    test('prevents starting a duplicate attempt on reconnect (FR-011 / NFR-004)', async () => {
+      const dupRes = await request(app)
+        .post(`/api/exams/${reconnectExam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(dupRes.status).toBe(409);
+      expect(dupRes.body.code).toBe('ACTIVE_ATTEMPT_EXISTS');
+    });
+
+    test('restores attempt as expired if reconnect occurs after deadline has passed', async () => {
+      const stored = Attempt.__store.find((a) => a.id === reconnectAttemptId);
+      stored.expiresAt = new Date(Date.now() - 10000);
+
+      const res = await request(app)
+        .get(`/api/attempts/${reconnectAttemptId}`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('expired');
+      expect(res.body.remainingSeconds).toBe(0);
+      // Saved answers are preserved even when expired
+      expect(res.body.answers[qIds[0]]).toBe('1');
+    });
+  });
 });
