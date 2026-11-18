@@ -43,6 +43,7 @@ async function main() {
       const startedAt = performance.now();
       try {
         const response = await fetch(url, {
+          signal: AbortSignal.timeout(10000),
           headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         });
         // Consume the response so timings include transfer completion.
