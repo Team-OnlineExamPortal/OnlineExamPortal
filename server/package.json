@@ -12,6 +12,7 @@
     "dev": "nodemon src/index.js",
     "test": "jest --runInBand",
     "test:coverage": "jest --runInBand --coverage",
+    "test:domain": "jest tests/domain.test.js --runInBand --coverage --collectCoverageFrom=src/domain.js",
     "perf:attempt": "node scripts/load-test-attempt.js",
     "seed:users": "node scripts/seed-users.js"
   },

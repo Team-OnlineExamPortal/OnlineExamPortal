@@ -112,7 +112,10 @@ examAttemptRouter.post(
     }
 
     // Select and shuffle questions per FR-005
-    const selected = selectQuestions(pool, exam.questionCount);
+    const selected = selectQuestions(
+      pool.map((question) => typeof question.toObject === 'function' ? question.toObject() : question),
+      exam.questionCount
+    );
 
     // Compute deadline: startedAt + duration, capped by exam.endTime
     const startedAt = new Date();
@@ -138,6 +141,13 @@ examAttemptRouter.post(
         expiresAt,
         selectedQuestionIds: questionSnapshots.map((q) => q.id),
         questions: questionSnapshots,
+        examTitle: exam.title,
+        gradingSnapshot: {
+          questions: selected.map((q) => ({
+            id: String(q.id || q._id), options: [...q.options], correctOption: q.correctOption,
+          })),
+          settings: { negativeMarking: Boolean(exam.negativeMarking) },
+        },
         answers: {},
         reviews: {},
       });
@@ -336,9 +346,13 @@ attemptRouter.put(
       attempt.markModified('reviews');
     }
 
-    if (typeof attempt.save === 'function') {
-      await attempt.save();
-    }
+    const saved = await Attempt.findOneAndUpdate(
+      { _id: attempt._id || attempt.id, __v: attempt.__v, status: 'active',
+        expiresAt: { $gt: new Date() }, result: { $exists: false } },
+      { $set: { answers: attempt.answers, reviews: attempt.reviews }, $inc: { __v: 1 } },
+      { new: true }
+    );
+    if (!saved) throw new HttpError(409, 'ATTEMPT_CHANGED', 'Attempt changed or closed; reload before saving');
 
     const savedAt = now.toISOString();
 
@@ -349,75 +363,6 @@ attemptRouter.put(
       questionId: trimmedQuestionId,
       answers: attempt.answers,
       reviews: attempt.reviews,
-    });
-  })
-);
-
-/**
- * FR-010: Explicit submit or timer auto-submit at deadline.
- * POST /api/attempts/:id/submit
- */
-attemptRouter.post(
-  '/:id/submit',
-  authenticate,
-  asyncHandler(async (req, res) => {
-    const attemptId = req.params.id;
-    if (!isValidId(attemptId)) {
-      throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
-    }
-
-    let attempt = null;
-    if (Attempt && typeof Attempt.findById === 'function') {
-      try {
-        attempt = await Attempt.findById(attemptId);
-      } catch (err) {
-        if (err.name === 'CastError' || err.kind === 'ObjectId') {
-          throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
-        }
-        throw err;
-      }
-    }
-
-    if (!attempt) {
-      throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
-    }
-
-    // Ownership check: only the student who owns the attempt can submit
-    if (String(attempt.studentId) !== String(req.user.userId)) {
-      throw new HttpError(403, 'FORBIDDEN', 'Access denied to this attempt');
-    }
-
-    // Idempotent submission: if already submitted, return existing submission
-    if (attempt.status === 'submitted') {
-      return res.status(200).json({
-        status: 'submitted',
-        attemptId: attempt._id || attempt.id,
-        examId: attempt.examId,
-        studentId: attempt.studentId,
-        submittedAt: attempt.submittedAt || attempt.updatedAt,
-        alreadySubmitted: true,
-      });
-    }
-
-    const now = new Date();
-    const isExpired = now > new Date(attempt.expiresAt);
-
-    // Finalize status: marked submitted
-    attempt.status = 'submitted';
-    attempt.submittedAt = isExpired ? new Date(attempt.expiresAt) : now;
-
-    if (typeof attempt.save === 'function') {
-      await attempt.save();
-    }
-
-    res.status(200).json({
-      status: 'submitted',
-      attemptId: attempt._id || attempt.id,
-      examId: attempt.examId,
-      studentId: attempt.studentId,
-      submittedAt: attempt.submittedAt,
-      autoSubmitted: isExpired,
-      answersCount: Object.keys(attempt.answers || {}).length,
     });
   })
 );
