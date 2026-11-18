@@ -13,6 +13,7 @@ const { notFound, errorHandler } = require('./errors');
 const { rejectUnsafeInput } = require('./input');
 const { router: submissionRouter } = require('./submissions');
 const { router: resultRouter } = require('./results');
+const { router: reportRouter } = require('./reports');
 
 function requestId(req, res, next) {
   req.id = crypto.randomUUID();
@@ -44,6 +45,7 @@ function createApp() {
   app.use('/api/exams', examRouter);
   app.use('/api/questions', questionRouter);
   app.use('/api/results', resultRouter);
+  app.use('/api/reports', reportRouter);
 
   // Exam Attempt processing module (FR-007, SEC-002, SEC-005)
   app.use('/api/exams', examAttemptRouter);
