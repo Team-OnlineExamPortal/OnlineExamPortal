@@ -134,6 +134,10 @@ const attemptSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
+    gradingSnapshot: { type: mongoose.Schema.Types.Mixed, select: false },
+    examTitle: String,
+    submittedAt: Date,
+    result: { type: mongoose.Schema.Types.Mixed },
   },
   { timestamps: true }
 );

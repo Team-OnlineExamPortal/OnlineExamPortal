@@ -111,7 +111,10 @@ examAttemptRouter.post(
     }
 
     // Select and shuffle questions per FR-005
-    const selected = selectQuestions(pool, exam.questionCount);
+    const selected = selectQuestions(
+      pool.map((question) => typeof question.toObject === 'function' ? question.toObject() : question),
+      exam.questionCount
+    );
 
     // Compute deadline: startedAt + duration, capped by exam.endTime
     const startedAt = new Date();
@@ -137,6 +140,13 @@ examAttemptRouter.post(
         expiresAt,
         selectedQuestionIds: questionSnapshots.map((q) => q.id),
         questions: questionSnapshots,
+        examTitle: exam.title,
+        gradingSnapshot: {
+          questions: selected.map((q) => ({
+            id: String(q.id || q._id), options: [...q.options], correctOption: q.correctOption,
+          })),
+          settings: { negativeMarking: Boolean(exam.negativeMarking) },
+        },
         answers: {},
         reviews: {},
       });
