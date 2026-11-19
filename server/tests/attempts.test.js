@@ -86,8 +86,8 @@ jest.mock('../src/models', () => {
   const Attempt = {
     __store: attempts,
     async findOneAndUpdate(query, update) {
-      const attempt = attempts.find((a) => String(a.id) === String(query._id));
-      if (!attempt || attempt.status !== query.status || attempt.result) return null;
+      const attempt = attempts.find((a) => String(a.id) === String(query._id) || String(a._id) === String(query._id));
+      if (!attempt || (query.status && attempt.status !== query.status) || attempt.result) return null;
       Object.assign(attempt, update.$set);
       return attempt;
     },
@@ -727,6 +727,133 @@ describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt
       // Questions are returned in stable sequence for client indexing
       expect(res.body.questions).toHaveLength(3);
       expect(res.body.questions.map((q) => q.id)).toEqual([q0, q1, q2]);
+    });
+  });
+
+  describe('FR-010: Explicit and Deadline Auto-Submission (POST /api/attempts/:id/submit)', () => {
+    let submitAttemptId;
+
+    beforeEach(async () => {
+      const exam = await Exam.create({
+        title: 'FR-010 Submission Exam',
+        category: 'Algorithms',
+        durationMinutes: 30,
+        startTime: new Date(Date.now() - 5 * 60 * 1000),
+        endTime: new Date(Date.now() + 60 * 60 * 1000),
+        questionCount: 2,
+        rules: { questionCount: 2 },
+        status: 'published',
+      });
+
+      const startRes = await request(app)
+        .post(`/api/exams/${exam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      submitAttemptId = startRes.body.attemptId;
+      const q1 = startRes.body.questions[0].id;
+
+      // Student answers question 1
+      await request(app)
+        .put(`/api/attempts/${submitAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q1, optionId: '1' });
+    });
+
+    test('explicit submission marks attempt submitted and records submittedAt (200)', async () => {
+      const res = await request(app)
+        .post(`/api/attempts/${submitAttemptId}/submit`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('submitted');
+      expect(res.body.attemptId).toBe(submitAttemptId);
+      expect(res.body).toHaveProperty('submittedAt');
+      expect(res.body.answersCount).toBe(1);
+
+      // Verify in store
+      const stored = Attempt.__store.find((a) => a.id === submitAttemptId);
+      expect(stored.status).toBe('submitted');
+      expect(stored.submittedAt).toBeTruthy();
+    });
+
+    test('submission is idempotent on duplicate submit calls (200)', async () => {
+      // First submit
+      await request(app)
+        .post(`/api/attempts/${submitAttemptId}/submit`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      // Second duplicate submit (e.g. rapid double-click or simultaneous timer)
+      const res2 = await request(app)
+        .post(`/api/attempts/${submitAttemptId}/submit`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res2.status).toBe(200);
+      expect(res2.body.status).toBe('submitted');
+      expect(res2.body.alreadySubmitted).toBe(true);
+    });
+
+    test('locks attempt after submission: rejects further answer modifications (409 ATTEMPT_CLOSED)', async () => {
+      await request(app)
+        .post(`/api/attempts/${submitAttemptId}/submit`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      const stored = Attempt.__store.find((a) => a.id === submitAttemptId);
+      const q2 = stored.questions[1].id;
+
+      const answerRes = await request(app)
+        .put(`/api/attempts/${submitAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q2, optionId: '0' });
+
+      expect(answerRes.status).toBe(409);
+      expect(answerRes.body.code).toBe('ATTEMPT_CLOSED');
+    });
+
+    test('auto-submits an attempt whose deadline has elapsed (200, autoSubmitted: true)', async () => {
+      const stored = Attempt.__store.find((a) => a.id === submitAttemptId);
+      // Simulate timer expiration on the server clock
+      stored.expiresAt = new Date(Date.now() - 1000);
+
+      const res = await request(app)
+        .post(`/api/attempts/${submitAttemptId}/submit`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('submitted');
+      expect(res.body.autoSubmitted).toBe(true);
+      expect(stored.status).toBe('submitted');
+    });
+
+    test('lazy auto-expiry: GET /api/attempts/:id lazily marks active attempt expired after deadline', async () => {
+      const stored = Attempt.__store.find((a) => a.id === submitAttemptId);
+      stored.expiresAt = new Date(Date.now() - 2000);
+
+      const res = await request(app)
+        .get(`/api/attempts/${submitAttemptId}`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('expired');
+      expect(res.body.remainingSeconds).toBe(0);
+      expect(stored.status).toBe('expired');
+    });
+
+    test('rejects submission from unauthorized student with 403 FORBIDDEN', async () => {
+      const res = await request(app)
+        .post(`/api/attempts/${submitAttemptId}/submit`)
+        .set('Authorization', `Bearer ${student2Token}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('FORBIDDEN');
+    });
+
+    test('rejects submission with 404 for invalid attempt ID', async () => {
+      const res = await request(app)
+        .post('/api/attempts/not-a-valid-id/submit')
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe('NOT_FOUND');
     });
   });
 });

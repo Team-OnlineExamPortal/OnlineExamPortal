@@ -8,7 +8,8 @@ const { gradeAttempt } = require('./grading');
 
 async function finalizeAttempt(id) {
   for (let retry = 0; retry < 5; retry += 1) {
-    const attempt = await Attempt.findById(id).select('+gradingSnapshot');
+    const query = Attempt.findById(id);
+    const attempt = typeof query?.select === 'function' ? await query.select('+gradingSnapshot') : await query;
     if (!attempt) throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
     if (attempt.result) return attempt.result;
     const score = await gradeAttempt(attempt);
@@ -34,10 +35,34 @@ async function finalizeAttempt(id) {
 
 const router = express.Router();
 router.post('/:id/submit', authenticate, requireRole(ROLES.STUDENT), asyncHandler(async (req, res) => {
-  if (!mongoose.isObjectIdOrHexString(req.params.id)) throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
-  const attempt = await Attempt.findOne({ _id: req.params.id, studentId: req.user.userId });
+  const id = req.params.id;
+  if (!mongoose.isObjectIdOrHexString(id) && !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) {
+    throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+  }
+  let attempt = null;
+  try {
+    attempt = await Attempt.findById(id);
+  } catch (err) {
+    if (err.name === 'CastError' || err.kind === 'ObjectId') {
+      throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
+    }
+    throw err;
+  }
   if (!attempt) throw new HttpError(404, 'NOT_FOUND', 'Attempt not found');
-  res.json({ ...(await finalizeAttempt(req.params.id)), status: 'submitted' });
+  if (String(attempt.studentId) !== String(req.user.userId)) {
+    throw new HttpError(403, 'FORBIDDEN', 'Access denied to this attempt');
+  }
+  const isDuplicate = Boolean(attempt.result || attempt.status === 'submitted');
+  const isAutoSubmitted = new Date() > new Date(attempt.expiresAt);
+  const finalized = await finalizeAttempt(id);
+  res.json({
+    ...finalized,
+    status: 'submitted',
+    submittedAt: finalized.completedAt,
+    answersCount: Object.keys(attempt.answers || {}).length,
+    ...(isDuplicate ? { alreadySubmitted: true } : {}),
+    ...(isAutoSubmitted ? { autoSubmitted: true } : {}),
+  });
 }));
 
 module.exports = { router, finalizeAttempt };

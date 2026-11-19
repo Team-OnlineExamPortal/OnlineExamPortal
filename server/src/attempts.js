@@ -7,6 +7,7 @@
  *   FR-011   Prevent two active attempts by one student for the same exam
  *   FR-009   Automatically save selected answers during an active exam
  *   FR-008   Allow navigation and mark for review
+ *   FR-010   Automatically submit exam attempt on deadline or explicit submit
  *   SEC-002  Enforce student-only access to exam taking
  *   SEC-005  Never expose correctOption or questions before active attempt
  */
@@ -212,6 +213,13 @@ attemptRouter.get(
     }
 
     const now = new Date();
+    if (attempt.status === 'active' && now > new Date(attempt.expiresAt)) {
+      attempt.status = 'expired';
+      attempt.submittedAt = new Date(attempt.expiresAt);
+      if (typeof attempt.save === 'function') {
+        await attempt.save();
+      }
+    }
     const remainingSeconds = Math.max(0, Math.floor((new Date(attempt.expiresAt).getTime() - now.getTime()) / 1000));
 
     // Ensure questions omit correctOption
