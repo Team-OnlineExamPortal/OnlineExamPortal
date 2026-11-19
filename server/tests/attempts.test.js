@@ -599,4 +599,134 @@ describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt
       stored.status = 'active';
     });
   });
+
+  describe('FR-008: Question Navigation and Mark for Review Persistence', () => {
+    let navAttemptId;
+    let questions;
+
+    beforeEach(async () => {
+      const exam = await Exam.create({
+        title: 'FR-008 Navigation Exam',
+        category: 'Algorithms',
+        durationMinutes: 45,
+        startTime: new Date(Date.now() - 5 * 60 * 1000),
+        endTime: new Date(Date.now() + 60 * 60 * 1000),
+        questionCount: 3,
+        rules: { questionCount: 3 },
+        status: 'published',
+      });
+
+      const res = await request(app)
+        .post(`/api/exams/${exam.id}/attempts`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      navAttemptId = res.body.attemptId;
+      questions = res.body.questions;
+    });
+
+    test('allows marking an unanswered question for review and retains flag across navigation', async () => {
+      const q1 = questions[0].id;
+
+      // Student flags question 1 for review without selecting an option
+      const markRes = await request(app)
+        .put(`/api/attempts/${navAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({
+          questionId: q1,
+          review: true,
+        });
+
+      expect(markRes.status).toBe(200);
+      expect(markRes.body.reviews[q1]).toBe(true);
+      expect(markRes.body.answers[q1]).toBeUndefined();
+
+      // Student navigates: fetches attempt to simulate navigating back to question 1
+      const getRes = await request(app)
+        .get(`/api/attempts/${navAttemptId}`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.reviews[q1]).toBe(true);
+      expect(getRes.body.answers[q1]).toBeUndefined();
+    });
+
+    test('toggles review flag on and off for an answered question while preserving the answer choice', async () => {
+      const q2 = questions[1].id;
+
+      // 1. Answer question 2
+      await request(app)
+        .put(`/api/attempts/${navAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q2, optionId: '0' });
+
+      // 2. Mark question 2 for review
+      const markRes = await request(app)
+        .put(`/api/attempts/${navAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q2, review: true });
+
+      expect(markRes.status).toBe(200);
+      expect(markRes.body.answers[q2]).toBe('0');
+      expect(markRes.body.reviews[q2]).toBe(true);
+
+      // 3. Unmark question 2 from review
+      const unmarkRes = await request(app)
+        .put(`/api/attempts/${navAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q2, review: false });
+
+      expect(unmarkRes.status).toBe(200);
+      expect(unmarkRes.body.answers[q2]).toBe('0');
+      expect(unmarkRes.body.reviews[q2]).toBe(false);
+
+      // 4. Verify persisted state on GET
+      const getRes = await request(app)
+        .get(`/api/attempts/${navAttemptId}`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(getRes.body.answers[q2]).toBe('0');
+      expect(getRes.body.reviews[q2]).toBe(false);
+    });
+
+    test('preserves entire navigation state across multiple questions with mixed answered and reviewed status', async () => {
+      const [q0, q1, q2] = questions.map((q) => q.id);
+
+      // Question 0: answered, not marked for review
+      await request(app)
+        .put(`/api/attempts/${navAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q0, optionId: '2', review: false });
+
+      // Question 1: answered AND marked for review
+      await request(app)
+        .put(`/api/attempts/${navAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q1, optionId: '1', review: true });
+
+      // Question 2: not answered, marked for review
+      await request(app)
+        .put(`/api/attempts/${navAttemptId}/answers`)
+        .set('Authorization', `Bearer ${student1Token}`)
+        .send({ questionId: q2, review: true });
+
+      // Fetch attempt (simulating client navigation panel state sync)
+      const res = await request(app)
+        .get(`/api/attempts/${navAttemptId}`)
+        .set('Authorization', `Bearer ${student1Token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.answers[q0]).toBe('2');
+      expect(res.body.reviews[q0]).toBe(false);
+
+      expect(res.body.answers[q1]).toBe('1');
+      expect(res.body.reviews[q1]).toBe(true);
+
+      expect(res.body.answers[q2]).toBeUndefined();
+      expect(res.body.reviews[q2]).toBe(true);
+
+      // Questions are returned in stable sequence for client indexing
+      expect(res.body.questions).toHaveLength(3);
+      expect(res.body.questions.map((q) => q.id)).toEqual([q0, q1, q2]);
+    });
+  });
 });
