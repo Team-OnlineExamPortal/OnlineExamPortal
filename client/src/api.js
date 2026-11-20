@@ -45,13 +45,21 @@ export const authApi = {
 export const examApi = {
   available: (token) => apiRequest('/exams/available', { token }),
   metadata: (id, token) => apiRequest(`/exams/${encodeURIComponent(id)}`, { token }),
-  // These endpoints are planned with the attempt-processing module and are not
-  // implemented by the current server yet.
   start: (examId, token) => apiRequest(`/exams/${encodeURIComponent(examId)}/attempts`, { token, method: 'POST' }),
   getAttempt: (attemptId, token) => apiRequest(`/attempts/${encodeURIComponent(attemptId)}`, { token }),
   saveAnswer: (attemptId, questionId, optionId, review, token) => apiRequest(`/attempts/${encodeURIComponent(attemptId)}/answers`, { token, method: 'PUT', body: JSON.stringify({ questionId, optionId, review }) }),
   submit: (attemptId, token) => apiRequest(`/attempts/${encodeURIComponent(attemptId)}/submit`, { token, method: 'POST' }),
   history: (token) => apiRequest('/results/me', { token }),
+};
+
+export const adminApi = {
+  questions: (token) => apiRequest('/questions', { token }),
+  saveQuestion: (id, body, token) => apiRequest('/questions' + (id ? '/' + encodeURIComponent(id) : ''), { token, method: id ? 'PUT' : 'POST', body: JSON.stringify(body) }),
+  disableQuestion: (id, token) => apiRequest('/questions/' + encodeURIComponent(id) + '/disable', { token, method: 'PATCH' }),
+  exams: (token) => apiRequest('/exams', { token }),
+  createExam: (body, token) => apiRequest('/exams', { token, method: 'POST', body: JSON.stringify(body) }),
+  students: (token) => apiRequest('/admin/students', { token }),
+  report: (group, id, token) => apiRequest('/reports/' + group + '/' + encodeURIComponent(id), { token }),
 };
 
 export { API_BASE_URL };

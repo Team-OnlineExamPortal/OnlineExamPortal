@@ -13,6 +13,10 @@ vi.mock('./api', () => ({
     available: vi.fn(), metadata: vi.fn(), start: vi.fn(), getAttempt: vi.fn(),
     saveAnswer: vi.fn(), submit: vi.fn(), history: vi.fn(),
   },
+  adminApi: {
+    questions: vi.fn().mockResolvedValue([]), exams: vi.fn().mockResolvedValue([]),
+    students: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 const student = { userId: 'student-1', name: 'Satyam Goyal', email: 'satyam@example.test', role: 'Student' };
@@ -44,6 +48,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); });
 
 describe('student portal journey (NFR-003)', () => {
+  it('routes an administrator login to the administrator workspace', async () => {
+    window.history.replaceState({}, '', '/login');
+    authApi.me.mockResolvedValue({ ...student, role: 'Administrator', name: 'Admin' });
+    const user = userEvent.setup();
+    renderApp();
+    await user.type(await screen.findByLabelText('Email address'), 'admin@example.test');
+    await user.type(screen.getByLabelText('Password'), 'safe-password');
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    expect(await screen.findByRole('heading', { name: 'Administration' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Exam history/ })).toBeNull();
+  });
   it('renders HTML-like question content as text', async () => {
     const user = userEvent.setup();
     const text = '<iframe title="untrusted question content"></iframe>';

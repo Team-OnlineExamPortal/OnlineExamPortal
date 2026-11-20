@@ -28,6 +28,10 @@ const router = express.Router();
 
 const isString = (v) => typeof v === 'string';
 
+router.get('/', authenticate, requireRole(ROLES.ADMIN), asyncHandler(async (req, res) => {
+  res.json(await Exam.find({}).select('title category durationMinutes startTime endTime questionCount negativeMarking').sort({ startTime: -1 }));
+}));
+
 /**
  * Validate MongoDB ObjectId or supported test ID.
  */

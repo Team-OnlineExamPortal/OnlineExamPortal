@@ -16,6 +16,7 @@ const { router: resultRouter } = require('./results');
 const { router: reportRouter } = require('./reports');
 const mongoose = require('mongoose');
 const { asyncHandler } = require('./errors');
+const { router: adminRouter } = require('./admin');
 
 function requestId(req, res, next) {
   req.id = crypto.randomUUID();
@@ -56,6 +57,7 @@ function createApp() {
   app.use('/api/exams', examRouter);
   app.use('/api/questions', questionRouter);
   app.use('/api/results', resultRouter);
+  app.use('/api/admin', adminRouter);
   app.use('/api/reports', reportRouter);
 
   // Exam Attempt processing module (FR-007, SEC-002, SEC-005)

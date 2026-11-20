@@ -17,15 +17,14 @@ export default function Login() {
     event.preventDefault(); setError(''); setBusy(true);
     try {
       const profile = registering ? await signUp(name, email, password) : await signIn(email, password);
-      if (profile.role !== 'Student') throw new Error('This portal is for student accounts.');
-      navigate('/');
+      navigate(profile.role === 'Administrator' ? '/admin' : '/');
     } catch (err) { setError(err.message || 'Unable to sign in.'); }
     finally { setBusy(false); }
   }
 
   return <div className="auth-layout">
     <section className="auth-story"><Link className="brand brand-light" to="/login"><span className="brand-mark">O</span><span>OEP<span className="brand-sub">ONLINE EXAM PORTAL</span></span></Link><div className="story-copy"><div className="eyebrow"><span className="live-dot" /> YOUR LEARNING, IN FOCUS</div><h1>Make every<br />attempt count.</h1><p>One calm place to prepare, take your exams, and see how far you’ve come.</p><div className="story-stat"><div className="stat-icon">✓</div><div><strong>Built for focused learning</strong><small>Your exams and progress, all together.</small></div></div></div><div className="story-foot">A clearer way to take your next step.</div></section>
-    <main className="auth-main"><div className="auth-card"><div className="mobile-brand"><span className="brand-mark">O</span> OEP</div><div className="eyebrow muted">STUDENT ACCESS</div><h2>{registering ? 'Create your account' : 'Welcome back'}</h2><p className="auth-intro">{registering ? 'Set up your student account to get started.' : 'Sign in to continue to your student workspace.'}</p>
+    <main className="auth-main"><div className="auth-card"><div className="mobile-brand"><span className="brand-mark">O</span> OEP</div><div className="eyebrow muted">PORTAL ACCESS</div><h2>{registering ? 'Create your account' : 'Welcome back'}</h2><p className="auth-intro">{registering ? 'Set up your student account to get started.' : 'Sign in to continue to your workspace.'}</p>
       <form onSubmit={submit} className="form-stack">
         {registering && <label>Full name<input autoComplete="name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" /></label>}
         <label>Email address<input autoComplete="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></label>
