@@ -76,3 +76,16 @@ to change them.
 The browser interface supports students and administrators. Administrator sign-in
 opens question management, exam scheduling and result reports. See [server/README.md](server/README.md) for
 administrator setup and [client/README.md](client/README.md) for frontend details.
+
+## Validation and submission
+
+See the [validation and release report](docs/OEP-2026-13_Validation_and_Release_Report.pdf),
+[requirement matrix](docs/requirements-traceability.md), and
+[executed validation record](docs/validation-execution.md) for actual test outcomes
+and acceptance boundaries. The [maintenance plan](docs/maintenance-plan.md) covers
+release, recovery and retention decisions; the [demonstration plan](docs/demo-plan.md)
+provides a timed walkthrough for the team.
+
+The combined implementation is validated on the feature branches. Protected-main
+merging still requires teammate review, and institutional production acceptance
+requires the decisions listed in the report.
