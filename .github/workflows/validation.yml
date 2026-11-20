@@ -18,7 +18,7 @@ jobs:
       - name: Prepare isolated CI configuration
         shell: bash
         run: |
-          mkdir -p .local/reports .local/jenkins
+          mkdir -p .local/reports .local/jenkins .local/agent
           secret=$(openssl rand -hex 48)
           password=$(openssl rand -hex 24)
           echo "::add-mask::$secret"
@@ -37,7 +37,8 @@ jobs:
             -e OEP_CI_BOOTSTRAP=1 -e JWT_SECRET -e ADMIN_EMAIL -e ADMIN_PASSWORD
             -e JAVA_OPTS=-Djenkins.install.runSetupWizard=false
             -e JENKINS_OPTS="--httpPort=18080 --httpListenAddress=127.0.0.1"
-            -v "$PWD:/workspace/oep" -v "$PWD/.local/jenkins:/var/jenkins_home"
+            -v "$PWD/.local/agent:/workspace" -v "$PWD:/workspace/oep"
+            -v "$PWD/.local/jenkins:/var/jenkins_home"
             -v /var/run/docker.sock:/var/run/docker.sock oep-jenkins
           )
           docker "${docker_args[@]}"
