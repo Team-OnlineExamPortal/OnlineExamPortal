@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-11-20T05:07:22.664Z",
+  "target": "https://localhost:8443",
+  "checks": [
+    "database readiness",
+    "frontend and SPA routes",
+    "authentication and role isolation",
+    "question lifecycle",
+    "scheduled attempts, safe questions, answer save and reconnect",
+    "immutable submission, scoring, history and reports"
+  ],
+  "passed": true
+}

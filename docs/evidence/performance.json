@@ -1,0 +1,15 @@
+{
+  "target": "https://localhost:8443/api/attempts/6affd58af9d8a55f9ff2ac64",
+  "concurrency": 20,
+  "durationSeconds": 30,
+  "requestCount": 21090,
+  "statusCounts": {
+    "200": 21090
+  },
+  "p50Ms": 25.56,
+  "p95Ms": 47.76,
+  "p99Ms": 56.56,
+  "thresholdMs": 500,
+  "passed": true,
+  "errors": []
+}

@@ -1,0 +1,30 @@
+# Validation execution record
+
+Executed Jenkins pipeline: [44678707349](https://github.com/Team-OnlineExamPortal/OnlineExamPortal/actions/runs/44678707349).
+
+Validated revision: b57d332911af0e8b465f3b49e5407107fccc7165.
+
+| Check | Actual result |
+| --- | --- |
+| Jenkins build / Docker deployment | SUCCESS; API and web containers healthy |
+| Validated source revision | b57d332911af0e8b465f3b49e5407107fccc7165 |
+| Server API/unit cases | 128 passed |
+| React UI/API client cases | 15 passed |
+| Real MongoDB integration | 9 passed |
+| Static analysis | 0 errors, 0 warnings |
+| Evaluation module coverage | 100% lines; 96.46% branches |
+| Whole-server unit coverage | 86.18% lines; 75.6% branches |
+| Deployed load probe | 21,090 requests, 20 clients, 30 seconds |
+| Latency | p95 47.76 ms; p99 56.56 ms; target 500 ms |
+| Readiness demonstration | 60 samples; 100.0% successful |
+| Monitored active test window | 2026-11-20T05:07:25.953Z to 2026-11-20T05:09:25.953Z |
+| Live browser walkthrough | Admin question/edit/disable/scheduling, student exam/reload/submission, both admin reports passed |
+| Deployed security audit | 3 safe events; required event types present; secret-exposure check passed |
+
+## Review boundaries
+
+- The feature PRs require teammate review and merging through protected main.
+- The recorded load profile needs team/faculty acceptance for the representative release environment.
+- The sampled two-minute test window is the scope of the availability measurement. Continue monitoring during intended live exam windows.
+- Institutional certificates, database access controls and backup/retention approval are required for internet-facing production use.
+- The GitHub Projects board was not inspected because the connected token lacks read:project scope. Issue, PR and contribution history were verified.

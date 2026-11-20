@@ -1,0 +1,10 @@
+{
+  "eventCount": 3,
+  "secretExposure": false,
+  "eventTypes": [
+    "LOGIN_FAILED",
+    "UNAUTHENTICATED",
+    "FORBIDDEN"
+  ],
+  "passed": true
+}
