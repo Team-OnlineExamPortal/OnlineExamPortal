@@ -3,6 +3,8 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { createApp } = require('./app');
+const { Attempt } = require('./models');
+const { startDeadlineWorker } = require('./deadlines');
 
 async function main() {
   const { MONGO_URI, JWT_SECRET, PORT = 5000 } = process.env;
@@ -13,9 +15,12 @@ async function main() {
   }
 
   await mongoose.connect(MONGO_URI);
+  await Attempt.init();
   console.log('MongoDB connected');
 
-  createApp().listen(PORT, () => console.log(`OEP API listening on port ${PORT}`));
+  const stopDeadlineWorker = startDeadlineWorker();
+  const server = createApp().listen(PORT, () => console.log(`OEP API listening on port ${PORT}`));
+  server.once('close', stopDeadlineWorker);
 }
 
 main().catch((err) => {
