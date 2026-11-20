@@ -16,13 +16,17 @@ const { User, Question, Exam, Attempt } = require('../src/models');
 const { finalizeAttempt } = require('../src/submissions');
 const { finalizeOverdueAttempts } = require('../src/deadlines');
 const binary = process.env.OEP_TEST_MONGOD || 'C:/Program Files/MongoDB/Server/8.2/bin/mongod.exe';
-const integration = fs.existsSync(binary) ? describe : describe.skip;
+const externalUri = process.env.OEP_TEST_MONGO_URI;
+const integration = externalUri || fs.existsSync(binary) ? describe : describe.skip;
 
 integration('results against isolated real MongoDB', () => {
   let mongo, student, other, exam, token, adminToken;
   const api = request(createApp());
   const sign = (user) => jwt.sign({}, process.env.JWT_SECRET, { subject: String(user._id), expiresIn: '1h' });
   beforeAll(async () => {
+    if (externalUri) {
+      await mongoose.connect(externalUri, { dbName: 'oep_test_' + require('node:crypto').randomBytes(8).toString('hex') });
+    } else {
     const port = await new Promise((resolve) => {
       const socket = net.createServer();
       socket.listen(0, '127.0.0.1', () => { const value = socket.address().port; socket.close(() => resolve(value)); });
@@ -31,6 +35,7 @@ integration('results against isolated real MongoDB', () => {
     mongo = spawn(binary, ['--dbpath', directory, '--port', String(port), '--bind_ip', '127.0.0.1'], { windowsHide: true, stdio: 'ignore' });
     mongo.on('error', () => {});
     await mongoose.connect(`mongodb://127.0.0.1:${port}/integration`, { serverSelectionTimeoutMS: 20000 });
+    }
     await Promise.all([User.init(), Attempt.init()]);
     [student, other] = await User.create([
       { name: 'Owner', email: 'owner@test.co', passwordHash: 'unused', role: 'Student' },
@@ -41,7 +46,11 @@ integration('results against isolated real MongoDB', () => {
     exam = await Exam.create({ title: 'Results exam', category: 'Test', questionCount: 3, durationMinutes: 30, startTime: new Date(Date.now() - 10000), endTime: new Date(Date.now() + 3600000), negativeMarking: true });
     await Question.create([0, 1, 2].map((i) => ({ text: `Q${i}`, options: ['no', 'yes'], correctOption: 1, category: 'Test' })));
   });
-  afterAll(async () => { await mongoose.disconnect(); if (mongo) { mongo.kill(); await new Promise((resolve) => mongo.once('exit', resolve)); } });
+  afterAll(async () => {
+    if (externalUri && mongoose.connection.readyState === 1) await mongoose.connection.dropDatabase();
+    await mongoose.disconnect();
+    if (mongo) { mongo.kill(); await new Promise((resolve) => mongo.once('exit', resolve)); }
+  });
   beforeEach(async () => { await Attempt.deleteMany({}); });
 
   async function start() {

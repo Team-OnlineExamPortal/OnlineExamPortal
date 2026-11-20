@@ -1,0 +1,5 @@
+# Used only by isolated CI jobs, so database integration tests can reach MongoDB.
+services:
+  mongo:
+    ports:
+      - "127.0.0.1:27018:27017"

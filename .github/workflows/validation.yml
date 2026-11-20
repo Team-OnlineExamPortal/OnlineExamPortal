@@ -1,0 +1,60 @@
+name: Project validation
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  jenkins-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare isolated CI configuration
+        shell: bash
+        run: |
+          mkdir -p .local/reports .local/jenkins
+          secret=$(openssl rand -hex 48)
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$secret"
+          echo "::add-mask::$password"
+          echo "JWT_SECRET=$secret" >> "$GITHUB_ENV"
+          echo "ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
+          echo "ADMIN_EMAIL=ci-admin@oep.test" >> "$GITHUB_ENV"
+      - name: Build Jenkins validation controller
+        run: docker build -f ci/jenkins/Dockerfile -t oep-jenkins .
+      - name: Execute Jenkinsfile
+        shell: bash
+        run: |
+          docker run -d --name oep-jenkins --network host +            --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" +            -e OEP_CI_BOOTSTRAP=1 -e JWT_SECRET -e ADMIN_EMAIL -e ADMIN_PASSWORD +            -e JAVA_OPTS=-Djenkins.install.runSetupWizard=false +            -e JENKINS_OPTS="--httpPort=18080 --httpListenAddress=127.0.0.1" +            -v "$PWD:/workspace/oep" -v "$PWD/.local/jenkins:/var/jenkins_home" +            -v /var/run/docker.sock:/var/run/docker.sock oep-jenkins
+          for i in $(seq 1 150); do
+            result=$(curl -sf http://127.0.0.1:18080/job/portal/lastBuild/api/json || true)
+            if [ -n "$result" ] && [ "$(echo "$result" | jq -r .building)" = false ]; then
+              curl -sf http://127.0.0.1:18080/job/portal/lastBuild/consoleText > .local/reports/jenkins.log
+              echo "$result" > .local/reports/jenkins-result.json
+              cat .local/reports/jenkins.log
+              test "$(echo "$result" | jq -r .result)" = SUCCESS
+              exit $?
+            fi
+            sleep 10
+          done
+          echo "Jenkins validation timed out"
+          docker logs oep-jenkins
+          exit 1
+      - name: Collect controller logs
+        if: always()
+        run: docker logs oep-jenkins > .local/reports/jenkins-controller.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: project-validation-evidence
+          path: |
+            .local/reports/
+            server/coverage/coverage-summary.json
+          include-hidden-files: true
+      - name: Stop isolated controller and services
+        if: always()
+        run: |
+          docker rm -f oep-jenkins || true
+          docker compose -p oep-validation -f compose.yaml -f compose.ci.yaml down --volumes --remove-orphans || true

@@ -1,0 +1,10 @@
+.git
+.local
+**/node_modules
+**/coverage
+**/dist
+**/.env
+**/logs
+**/.runtime-check.cjs
+**/review-repro.cjs
+portal-runtime-check.jpg

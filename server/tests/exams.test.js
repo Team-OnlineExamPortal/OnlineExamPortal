@@ -16,7 +16,6 @@ process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret-123';
 process.env.BCRYPT_ROUNDS = '4';
 
-const mongoose = require('mongoose');
 
 jest.mock('../src/models', () => {
   const users = [];

@@ -42,7 +42,7 @@ function freePort(port) {
 
 async function waitFor(check, label) {
   for (let retry = 0; retry < 60 && !stopping; retry += 1) {
-    try { if (await check()) return; } catch {}
+    try { if (await check()) return; } catch { /* Services may refuse connections during startup. */ }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`${label} could not start. Check the service output above.`);
