@@ -1,5 +1,5 @@
 pipeline {
-  agent { node { customWorkspace '/workspace/oep' } }
+  agent { node { label ''; customWorkspace '/workspace/oep' } }
   options { timestamps(); timeout(time: 25, unit: 'MINUTES'); skipDefaultCheckout(true) }
   environment {
     COMPOSE_PROJECT_NAME = 'oep-validation'
