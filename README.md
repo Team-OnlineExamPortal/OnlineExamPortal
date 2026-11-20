@@ -73,7 +73,6 @@ starting a local MongoDB process. Defaults are API port 5000, frontend port 5173
 and local database port 27018. Set `PORT`, `OEP_CLIENT_PORT`, or `OEP_MONGO_PORT`
 to change them.
 
-The browser interface supports students. Administrator question management, exam
-creation, and reports use the API. See [server/README.md](server/README.md) for
+The browser interface supports students and administrators. Administrator sign-in
+opens question management, exam scheduling and result reports. See [server/README.md](server/README.md) for
 administrator setup and [client/README.md](client/README.md) for frontend details.
- 

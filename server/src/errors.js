@@ -26,7 +26,6 @@ function notFound(req, res) {
   });
 }
 
-// eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, next) {
   if (res.headersSent) return next(err);
 

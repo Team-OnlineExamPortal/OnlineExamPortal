@@ -182,7 +182,7 @@ export default function Exam() {
     return () => window.removeEventListener('online', retry);
   }, [attempt, token]);
 
-  if (attempt?.submitted) return <Shell><div className="empty-state"><div className="empty-icon">✓</div><h3>Exam submitted</h3><p>The server accepted your submission. Your result will appear in exam history when the results service is connected.</p><Link className="button primary" to="/history">View history <span>→</span></Link></div></Shell>;
+  if (attempt?.submitted) return <Shell><div className="empty-state"><div className="empty-icon">✓</div><h3>Exam submitted</h3><p>Your exam has been submitted. View your result in exam history.</p><Link className="button primary" to="/history">View history <span>→</span></Link></div></Shell>;
 
   if (attempt) {
     const question = attempt.questions[currentIndex];
