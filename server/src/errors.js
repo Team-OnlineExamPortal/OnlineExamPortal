@@ -30,6 +30,13 @@ function errorHandler(err, req, res, next) {
   if (res.headersSent) return next(err);
 
   if (err instanceof HttpError) {
+    if (err.status === 403 && !err.auditRecorded) {
+      const audit = require('./audit');
+      audit.record({
+        type: audit.EVENTS.FORBIDDEN, reason: err.code,
+        userId: req.user?.userId, role: req.user?.role, ...audit.fromRequest(req),
+      });
+    }
     return res
       .status(err.status)
       .json({ code: err.code, message: err.message, requestId: req.id });

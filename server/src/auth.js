@@ -233,7 +233,9 @@ function requireRole(...allowedRoles) {
         role: req.user.role,
         ...audit.fromRequest(req),
       });
-      return next(new HttpError(403, 'FORBIDDEN', 'You do not have permission to perform this action'));
+      const error = new HttpError(403, 'FORBIDDEN', 'You do not have permission to perform this action');
+      error.auditRecorded = true;
+      return next(error);
     }
     return next();
   };

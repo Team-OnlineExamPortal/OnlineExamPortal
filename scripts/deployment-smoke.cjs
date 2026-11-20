@@ -34,6 +34,8 @@ async function main() {
   await call('POST', '/auth/register', { name: 'Validation Student', email, password }, undefined, 201);
   await call('POST', '/auth/register', { name: 'Duplicate', email, password }, undefined, 409);
   const student = await call('POST', '/auth/login', { email, password });
+  await call('POST', '/auth/login', { email, password: 'incorrect-password' }, undefined, 401);
+  await call('GET', '/questions', undefined, undefined, 401);
   await call('GET', '/admin/students', undefined, student.token, 403);
   await call('GET', '/admin/students', undefined, admin.token);
   checks.push('authentication and role isolation');

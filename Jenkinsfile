@@ -37,6 +37,8 @@ pipeline {
         sh 'docker compose -f compose.yaml -f compose.ci.yaml -f compose.https.yaml exec -T -e ADMIN_EMAIL -e ADMIN_PASSWORD api npm run seed:users'
         sh 'node scripts/deployment-smoke.cjs'
         sh 'node scripts/measure-deployment.cjs'
+        sh 'docker compose -f compose.yaml -f compose.ci.yaml -f compose.https.yaml cp api:/app/logs/audit.log .local/reports/application-audit.jsonl'
+        sh 'node scripts/verify-audit.cjs'
       }
     }
   }
