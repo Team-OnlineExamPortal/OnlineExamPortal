@@ -48,21 +48,32 @@ Agile (Scrum, 6 sprints). See `docs/` for the full SRS, SAD, STP and sprint plan
  
 ## Getting started
  
-For local development, start the API and student client in separate terminals:
+From the project root, run:
 
 ```bash
-cd server
-npm install
-cp .env.example .env
-npm run dev
+npm start
 ```
 
-```bash
-cd client
-npm install
-cp .env.example .env
-npm run dev
-```
+Open **http://localhost:5173**. Choose **Create account** to register a student.
+Press **Ctrl+C** to stop the project.
 
-See [client/README.md](client/README.md) and [server/README.md](server/README.md) for details. The student client currently connects to authentication and available-exam APIs; attempt processing and result history require backend endpoints that are still pending.
+The launcher installs locked dependencies on first use, generates a persistent local
+signing secret, starts MongoDB, and launches the API and frontend. Later starts reuse
+the installed dependencies and saved database. Node.js 22.12+ and MongoDB Community
+Server must be installed.
+
+MongoDB is detected on PATH or in the standard Windows installation directory.
+Set `OEP_MONGOD` for another installation path. Database files are stored outside
+the checkout and OneDrive, under the operating system's local application data
+directory. Generated settings in `.local/` are git-ignored.
+
+Existing environment variables and `server/.env` settings are supported. If
+`MONGO_URI` is configured, the launcher connects to that database instead of
+starting a local MongoDB process. Defaults are API port 5000, frontend port 5173,
+and local database port 27018. Set `PORT`, `OEP_CLIENT_PORT`, or `OEP_MONGO_PORT`
+to change them.
+
+The browser interface supports students. Administrator question management, exam
+creation, and reports use the API. See [server/README.md](server/README.md) for
+administrator setup and [client/README.md](client/README.md) for frontend details.
  
