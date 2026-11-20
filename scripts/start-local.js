@@ -70,6 +70,17 @@ async function main() {
   if (major < 22 || (major === 22 && minor < 12)) throw new Error('Use Node.js 22.12 or newer.');
   fs.mkdirSync(local, { recursive: true });
 
+  // Check running services before npm ci can remove files used by Vite on Windows.
+  const envFile = path.join(root, 'server/.env');
+  const configured = fs.existsSync(envFile)
+    ? require('node:util').parseEnv(fs.readFileSync(envFile, 'utf8')) : {};
+  const settings = { ...configured, ...process.env };
+  const apiPort = Number(settings.PORT || 5000);
+  const clientPort = Number(settings.OEP_CLIENT_PORT || 5173);
+  await freePort(apiPort);
+  await freePort(clientPort);
+  if (!settings.MONGO_URI) await freePort(Number(settings.OEP_MONGO_PORT || 27018));
+
   // Install only when the lockfile changes or the installation is missing.
   for (const folder of ['server', 'client']) {
     const directory = path.join(root, folder);
@@ -83,19 +94,10 @@ async function main() {
       const result = spawnSync(process.execPath, [npm, 'ci', '--no-audit', '--no-fund'], {
         cwd: directory, windowsHide: true, stdio: 'inherit',
       });
-      if (result.status !== 0) throw new Error(`${folder} dependency installation failed; check your connection and retry npm start.`);
+      if (result.status !== 0) throw new Error(`${folder} dependency installation failed. If Windows reports EPERM, stop the running project with Ctrl+C, then retry npm start. Otherwise check the npm error above.`);
       fs.writeFileSync(stamp, hash);
     }
   }
-
-  const dotenv = require(path.join(root, 'server/node_modules/dotenv'));
-  const envFile = path.join(root, 'server/.env');
-  const configured = fs.existsSync(envFile) ? dotenv.parse(fs.readFileSync(envFile)) : {};
-  const settings = { ...configured, ...process.env };
-  const apiPort = Number(settings.PORT || 5000);
-  const clientPort = Number(settings.OEP_CLIENT_PORT || 5173);
-  await freePort(apiPort);
-  await freePort(clientPort);
 
   const secretFile = path.join(local, 'jwt-secret');
   if (!fs.existsSync(secretFile)) fs.writeFileSync(secretFile, crypto.randomBytes(48).toString('hex'), { mode: 0o600 });
