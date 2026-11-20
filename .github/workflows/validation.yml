@@ -35,6 +35,7 @@ jobs:
             run -d --name oep-jenkins --network host
             --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)"
             -e OEP_CI_BOOTSTRAP=1 -e JWT_SECRET -e ADMIN_EMAIL -e ADMIN_PASSWORD
+            -e HOME=/var/jenkins_home -e npm_config_cache=/var/jenkins_home/.npm
             -e JAVA_OPTS=-Djenkins.install.runSetupWizard=false
             -e JENKINS_OPTS="--httpPort=18080 --httpListenAddress=127.0.0.1"
             -v "$PWD/.local/agent:/workspace" -v "$PWD:/workspace/oep"
