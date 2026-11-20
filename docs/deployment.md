@@ -59,6 +59,11 @@ Node; TLS verification stays enabled.
 builds React, builds and deploys the Compose application, executes real MongoDB
 integration tests, then runs system, load and sampled availability validation.
 
+The server and frontend each enforce aggregate 80% line, statement, function and
+branch coverage. A separate domain-only run retains the evaluation requirement.
+After system smoke, the bounded security regression/fuzzing probe executes against
+the same HTTPS deployment. See security-validation-plan.md for scope and cases.
+
 `.github/workflows/validation.yml` runs an actual Jenkins controller and executes
 that Jenkinsfile on an isolated Ubuntu runner. The controller is bound to
 loopback and destroyed after the run. The Docker socket is used only on that

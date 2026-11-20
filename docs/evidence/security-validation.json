@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-11-20T06:31:00.430Z",
+  "target": "http://localhost:5000",
+  "seed": 20261120,
+  "requests": 298,
+  "passed": true,
+  "checks": [
+    {
+      "id": "SEC-P01",
+      "description": "Public registration cannot grant Administrator",
+      "actualResult": "Both role-injection fixtures remained Students",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-P02",
+      "description": "Unauthenticated and tampered-token requests rejected",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-P03",
+      "description": "Student role cannot list protected data or mutate questions/exams",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-P04",
+      "description": "Another student cannot read, write or submit the owner attempt",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-P05",
+      "description": "Question text stays JSON data and answer keys remain private",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-P06",
+      "description": "Malformed JSON and oversized bodies have bounded safe errors",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-F01",
+      "description": "Seeded nested operator and prototype-key JSON/query fuzz corpus",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-F02",
+      "description": "Wrong-type authentication fields rejected before database access",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-F03",
+      "description": "Malformed resource identifiers return 404 without server exceptions",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    },
+    {
+      "id": "SEC-P07",
+      "description": "Cross-owner results denied and final results resist later writes",
+      "actualResult": "Expected responses and invariants observed",
+      "status": "PASS"
+    }
+  ],
+  "scope": "Bounded regression and seeded API fuzzing on an isolated test deployment; not an independent penetration-test certification."
+}

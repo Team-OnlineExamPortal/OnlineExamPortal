@@ -86,6 +86,12 @@ and acceptance boundaries. The [maintenance plan](docs/maintenance-plan.md) cove
 release, recovery and retention decisions; the [demonstration plan](docs/demo-plan.md)
 provides a timed walkthrough for the team.
 
+The current [STP execution addendum](docs/stp-execution.md) records Actual Result
+and Pass/Fail status for every planned case. The
+[security validation and fuzzing plan](docs/security-validation-plan.md) and
+[review closure](docs/validation-review-closure.md) document the expanded security
+checks and 80% aggregate server/frontend coverage gates.
+
 The combined implementation is validated on the feature branches. Protected-main
 merging still requires teammate review, and institutional production acceptance
 requires the decisions listed in the report.

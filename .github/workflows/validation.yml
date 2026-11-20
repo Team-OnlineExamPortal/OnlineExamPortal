@@ -70,6 +70,7 @@ jobs:
           path: |
             .local/reports/
             server/coverage/coverage-summary.json
+            client/coverage/coverage-summary.json
           include-hidden-files: true
       - name: Stop isolated controller and services
         if: always()

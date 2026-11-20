@@ -61,3 +61,36 @@ it('shows API validation failures and keeps the entered question', async () => {
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Category is required');
   expect(screen.getByLabelText('Question text').value).toBe('Which is even?');
 });
+
+it('creates a new question, removes a selected option safely and can cancel editing', async () => {
+  const user = userEvent.setup();
+  render(<BrowserRouter><Admin /></BrowserRouter>);
+  await screen.findByRole('button', { name: 'Edit Which is even?' });
+  await user.type(screen.getByLabelText('Question text'), 'New question');
+  await user.type(screen.getByLabelText('Category'), 'Science');
+  await user.type(screen.getByLabelText('Option 1'), 'First');
+  await user.type(screen.getByLabelText('Option 2'), 'Second');
+  await user.click(screen.getByRole('button', { name: 'Add option' }));
+  await user.type(screen.getByLabelText('Option 3'), 'Third');
+  await user.selectOptions(screen.getByLabelText('Correct answer'), '2');
+  await user.click(screen.getByRole('button', { name: 'Remove last option' }));
+  expect(screen.getByLabelText('Correct answer').value).toBe('1');
+  await user.click(screen.getByRole('button', { name: 'Save question' }));
+  expect(await screen.findByText('Question saved.')).toBeTruthy();
+  expect(adminApi.saveQuestion).toHaveBeenCalledWith(null, { text: 'New question', category: 'Science', options: ['First', 'Second'], correctOption: 1 }, 'admin-token');
+  await user.click(screen.getByRole('button', { name: 'Edit Which is even?' }));
+  await user.click(screen.getByRole('button', { name: 'Cancel edit' }));
+  expect(screen.getByLabelText('Question text').value).toBe('');
+});
+
+it('shows an empty report without inventing an average or result rows', async () => {
+  adminApi.report.mockResolvedValue({ count: 0, averageScore: null, results: [] });
+  const user = userEvent.setup();
+  render(<BrowserRouter><Admin /></BrowserRouter>);
+  await screen.findByRole('button', { name: 'Edit Which is even?' });
+  await user.click(screen.getByRole('tab', { name: 'Reports' }));
+  await user.selectOptions(screen.getByLabelText('Select exam'), 'e1');
+  await user.click(screen.getByRole('button', { name: 'Load report' }));
+  expect(await screen.findByText('No submitted results for this selection.')).toBeTruthy();
+  expect(screen.queryByRole('table')).toBeNull();
+});

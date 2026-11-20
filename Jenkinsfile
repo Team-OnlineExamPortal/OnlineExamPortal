@@ -22,7 +22,8 @@ pipeline {
     stage('Unit and UI tests') {
       steps {
         sh 'npm test --prefix server -- --coverage --coverageReporters=json-summary --coverageReporters=text'
-        sh 'npm test --prefix client'
+        sh 'npm run test:domain --prefix server -- --coverageDirectory=coverage-domain'
+        sh 'npm run test:coverage --prefix client'
         sh 'npm run build --prefix client'
       }
     }
@@ -36,6 +37,7 @@ pipeline {
       steps {
         sh 'docker compose -f compose.yaml -f compose.ci.yaml -f compose.https.yaml exec -T -e ADMIN_EMAIL -e ADMIN_PASSWORD api npm run seed:users'
         sh 'node scripts/deployment-smoke.cjs'
+        sh 'node scripts/security-validation.cjs'
         sh 'node scripts/measure-deployment.cjs'
         sh 'docker compose -f compose.yaml -f compose.ci.yaml -f compose.https.yaml cp api:/app/logs/audit.log .local/reports/application-audit.jsonl'
         sh 'node scripts/verify-audit.cjs'
@@ -45,7 +47,7 @@ pipeline {
   post {
     always {
       sh 'docker compose -f compose.yaml -f compose.ci.yaml -f compose.https.yaml logs --no-color > .local/reports/compose.log || true'
-      archiveArtifacts artifacts: '.local/reports/**,server/coverage/coverage-summary.json', allowEmptyArchive: true
+      archiveArtifacts artifacts: '.local/reports/**,server/coverage/coverage-summary.json,client/coverage/coverage-summary.json', allowEmptyArchive: true
       // The isolated CI project owns these disposable volumes.
       sh 'docker compose -f compose.yaml -f compose.ci.yaml -f compose.https.yaml down --volumes --remove-orphans'
     }

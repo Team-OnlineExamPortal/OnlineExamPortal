@@ -23,7 +23,7 @@
       "!src/index.js"
     ],
     "coverageThreshold": {
-      "./src/domain.js": {
+      "global": {
         "branches": 80,
         "functions": 80,
         "lines": 80,

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, apiRequest, authApi, examApi } from './api';
+import { ApiError, apiRequest, authApi, examApi, adminApi } from './api';
 
 beforeEach(() => { vi.stubGlobal('fetch', vi.fn()); });
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -40,5 +40,39 @@ describe('API client', () => {
     fetch.mockRejectedValue(new Error('socket unavailable'));
     await expect(apiRequest('/health')).rejects.toBeInstanceOf(ApiError);
     await expect(apiRequest('/health')).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
+  });
+
+  it('preserves API contracts and encodes identifiers for account, attempt and administrator operations', async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    const body = { title: 'Example' };
+    const cases = [
+      [() => authApi.register('Student', 'a@b.co', 'password'), '/auth/register', 'POST'],
+      [() => authApi.me('jwt'), '/auth/me'],
+      [() => examApi.metadata('id /?', 'jwt'), '/exams/id%20%2F%3F'],
+      [() => examApi.getAttempt('id /?', 'jwt'), '/attempts/id%20%2F%3F'],
+      [() => examApi.submit('id /?', 'jwt'), '/attempts/id%20%2F%3F/submit', 'POST'],
+      [() => adminApi.questions('jwt'), '/questions'],
+      [() => adminApi.saveQuestion(null, body, 'jwt'), '/questions', 'POST'],
+      [() => adminApi.saveQuestion('id /?', body, 'jwt'), '/questions/id%20%2F%3F', 'PUT'],
+      [() => adminApi.disableQuestion('id /?', 'jwt'), '/questions/id%20%2F%3F/disable', 'PATCH'],
+      [() => adminApi.exams('jwt'), '/exams'],
+      [() => adminApi.createExam(body, 'jwt'), '/exams', 'POST'],
+      [() => adminApi.students('jwt'), '/admin/students'],
+      [() => adminApi.report('students', 'id /?', 'jwt'), '/reports/students/id%20%2F%3F'],
+    ];
+    for (const [invoke, route, method] of cases) {
+      await invoke();
+      const [url, options] = fetch.mock.calls.at(-1);
+      expect(url.endsWith(route)).toBe(true);
+      expect(options.method || 'GET').toBe(method || 'GET');
+      if (route !== '/auth/register') expect(options.headers.Authorization).toBe('Bearer jwt');
+    }
+  });
+
+  it('handles non-JSON server errors and respects a caller abort signal', async () => {
+    fetch.mockResolvedValue({ ok: false, status: 502, json: async () => { throw new Error('HTML proxy error'); } });
+    const signal = new AbortController().signal;
+    await expect(apiRequest('/health', { signal })).rejects.toMatchObject({ message: 'Request failed (502)', status: 502 });
+    expect(fetch.mock.calls[0][1].signal).toBe(signal);
   });
 });

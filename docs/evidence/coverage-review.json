@@ -1,0 +1,104 @@
+{
+  "executedAt": "2026-11-20T06:33:24.236Z",
+  "environment": "Local Node 22.20.0 on Windows; full CI reruns these same gates",
+  "thresholds": {
+    "lines": 80,
+    "statements": 80,
+    "functions": 80,
+    "branches": 80
+  },
+  "server": {
+    "lines": {
+      "total": 644,
+      "covered": 587,
+      "skipped": 0,
+      "pct": 91.14
+    },
+    "statements": {
+      "total": 710,
+      "covered": 637,
+      "skipped": 0,
+      "pct": 89.71
+    },
+    "functions": {
+      "total": 95,
+      "covered": 87,
+      "skipped": 0,
+      "pct": 91.57
+    },
+    "branches": {
+      "total": 615,
+      "covered": 493,
+      "skipped": 0,
+      "pct": 80.16
+    },
+    "branchesTrue": {
+      "total": 0,
+      "covered": 0,
+      "skipped": 0,
+      "pct": "Unknown"
+    }
+  },
+  "client": {
+    "lines": {
+      "total": 323,
+      "covered": 306,
+      "skipped": 0,
+      "pct": 94.73
+    },
+    "statements": {
+      "total": 410,
+      "covered": 378,
+      "skipped": 0,
+      "pct": 92.19
+    },
+    "functions": {
+      "total": 134,
+      "covered": 122,
+      "skipped": 0,
+      "pct": 91.04
+    },
+    "branches": {
+      "total": 342,
+      "covered": 277,
+      "skipped": 0,
+      "pct": 80.99
+    },
+    "branchesTrue": {
+      "total": 0,
+      "covered": 0,
+      "skipped": 0,
+      "pct": 100
+    }
+  },
+  "testCounts": {
+    "server": 137,
+    "client": 29
+  },
+  "domain": {
+    "lines": {
+      "total": 64,
+      "covered": 64,
+      "skipped": 0,
+      "pct": 100
+    },
+    "functions": {
+      "total": 12,
+      "covered": 12,
+      "skipped": 0,
+      "pct": 100
+    },
+    "statements": {
+      "total": 86,
+      "covered": 86,
+      "skipped": 0,
+      "pct": 100
+    },
+    "branches": {
+      "total": 113,
+      "covered": 109,
+      "skipped": 0,
+      "pct": 96.46
+    }
+  }
+}

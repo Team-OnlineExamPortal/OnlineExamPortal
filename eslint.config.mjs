@@ -3,7 +3,7 @@ import globals from 'globals';
 import react from 'eslint-plugin-react';
 
 export default [
-  { ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '.local/**', 'server/.runtime-check.cjs', 'server/review-repro.cjs'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '**/coverage-domain/**', '.local/**', 'server/.runtime-check.cjs', 'server/review-repro.cjs'] },
   js.configs.recommended,
   { files: ['**/*.{js,cjs,mjs}'], languageOptions: { globals: { ...globals.node, ...globals.jest, ...globals.browser } },
     rules: { 'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }] } },
