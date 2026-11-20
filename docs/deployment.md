@@ -68,7 +68,7 @@ with Node 22, npm, Docker and Compose. Configure a Pipeline job from this reposi
 and use `Jenkinsfile`; set the job workspace to the agent checkout and adjust the
 provided CI workspace `/workspace/oep` for that agent.
 
-CI creates a new random database signing secret and a synthetic administrator
+CI creates a new random JWT signing secret and a synthetic administrator
 password for each run. They are masked in the runner logs. JWTs and account secrets
 stay outside the archived report folder.
 
