@@ -1,0 +1,12 @@
+# Compose 2.24.4+ supports !override. Supply an institution-issued certificate in production.
+services:
+  web:
+    build:
+      args:
+        NGINX_CONFIG: client/nginx.https.conf
+    ports: !override
+      - "127.0.0.1:${OEP_HTTPS_PORT:-8443}:443"
+    volumes:
+      - "${OEP_TLS_DIR:?Set OEP_TLS_DIR to the absolute certificate directory}:/etc/nginx/tls:ro"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--cacert", "/etc/nginx/tls/tls.crt", "https://localhost/api/ready"]

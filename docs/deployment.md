@@ -44,6 +44,17 @@ between releases. Back up MongoDB before applying schema changes.
 
 ## Jenkins CI/CD
 
+### HTTPS deployment
+
+An HTTPS overlay is included. Set `OEP_TLS_DIR` to the absolute directory containing
+`tls.crt` and `tls.key`, then run
+`docker compose -f compose.yaml -f compose.https.yaml up --build -d --wait`.
+Open `https://localhost:8443` with a certificate trusted by the browser. Compose
+2.24.4 or newer is required. For institutional hosting, use its issued certificate,
+domain and reverse-proxy configuration. The CI job generates a one-day certificate
+for its isolated localhost deployment and explicitly trusts that certificate in
+Node; TLS verification stays enabled.
+
 `Jenkinsfile` installs locked dependencies, runs ESLint, API/UI tests and coverage,
 builds React, builds and deploys the Compose application, executes real MongoDB
 integration tests, then runs system, load and sampled availability validation.
