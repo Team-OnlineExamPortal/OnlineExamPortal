@@ -14,6 +14,7 @@ const jwt = require('jsonwebtoken');
 const { createApp } = require('../src/app');
 const { User, Question, Exam, Attempt } = require('../src/models');
 const { finalizeAttempt } = require('../src/submissions');
+const { finalizeOverdueAttempts } = require('../src/deadlines');
 const binary = process.env.OEP_TEST_MONGOD || 'C:/Program Files/MongoDB/Server/8.2/bin/mongod.exe';
 const integration = fs.existsSync(binary) ? describe : describe.skip;
 
@@ -81,7 +82,7 @@ integration('results against isolated real MongoDB', () => {
 
   test('history finalizes overdue attempts, and unrelated students cannot submit them', async () => {
     const attempt = await start();
-    await api.post(`/api/attempts/${attempt.id}/submit`).set('Authorization', `Bearer ${sign(other)}`).expect(404);
+    await api.post(`/api/attempts/${attempt.id}/submit`).set('Authorization', `Bearer ${sign(other)}`).expect(403);
     await Attempt.updateOne({ _id: attempt.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
     const history = await api.get('/api/results/me').set('Authorization', `Bearer ${token}`).expect(200);
     assert.equal(history.body[0].score, 0); assert.equal(history.body[0].unansweredCount, 3);
@@ -93,6 +94,52 @@ integration('results against isolated real MongoDB', () => {
     await Attempt.updateOne({ _id: attempt.id }, { $unset: { gradingSnapshot: 1 }, $set: { questions: [] } });
     await assert.rejects(finalizeAttempt(attempt.id), { code: 'GRADING_UNAVAILABLE' });
     assert.equal((await Attempt.findById(attempt.id)).result, undefined);
+  });
+
+  test('reading an overdue attempt persists its final score and rejects later answers', async () => {
+    const attempt = await start();
+    const expiresAt = new Date(Date.now() - 1000);
+    await Attempt.updateOne({ _id: attempt.id }, { $set: { expiresAt } });
+    const response = await api.get(`/api/attempts/${attempt.id}`).set('Authorization', `Bearer ${token}`).expect(200);
+    assert.equal(response.body.status, 'submitted');
+    const stored = await Attempt.findById(attempt.id);
+    assert.equal(stored.result.unansweredCount, 3);
+    assert.equal(new Date(stored.result.completedAt).getTime(), expiresAt.getTime());
+    await api.put(`/api/attempts/${attempt.id}/answers`).set('Authorization', `Bearer ${token}`)
+      .send({ questionId: attempt.questions[0].id, optionId: '1' }).expect(409);
+  });
+
+  test('invalid option and review values never modify persisted answers', async () => {
+    const attempt = await start();
+    for (const fields of [{ optionId: {} }, { optionId: true }, { optionId: '-1' },
+      { optionId: '2' }, { optionId: 0.5 }, { review: 'false' }]) {
+      await api.put(`/api/attempts/${attempt.id}/answers`).set('Authorization', `Bearer ${token}`)
+        .send({ questionId: attempt.questions[0].id, ...fields }).expect(400);
+    }
+    const stored = await Attempt.findById(attempt.id);
+    assert.deepEqual(stored.answers, {});
+    assert.deepEqual(stored.reviews, {});
+  });
+
+  test('deadline sweep finalizes an attempt without a browser request', async () => {
+    const attempt = await start();
+    await Attempt.updateOne({ _id: attempt.id }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+    const errors = [];
+    await finalizeOverdueAttempts((...args) => errors.push(args));
+    assert.deepEqual(errors, []);
+    const stored = await Attempt.findById(attempt.id);
+    assert.equal(stored.status, 'submitted');
+    assert.equal(stored.result.unansweredCount, 3);
+    await finalizeOverdueAttempts((...args) => errors.push(args));
+    assert.equal(await Attempt.countDocuments({ result: { $exists: true } }), 1);
+  });
+
+  test('backfilling a previously submitted attempt preserves its submission time', async () => {
+    const attempt = await start();
+    const submittedAt = new Date(Date.now() - 1000);
+    await Attempt.updateOne({ _id: attempt.id }, { $set: { status: 'submitted', submittedAt } });
+    const result = await finalizeAttempt(attempt.id);
+    assert.equal(new Date(result.completedAt).getTime(), submittedAt.getTime());
   });
 
   test('concurrent save and submit preserve the winning committed state', async () => {

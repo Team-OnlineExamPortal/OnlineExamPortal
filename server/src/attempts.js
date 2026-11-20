@@ -17,6 +17,7 @@ const { Attempt, Exam, Question, ROLES } = require('./models');
 const { authenticate, requireRole } = require('./auth');
 const { HttpError, asyncHandler } = require('./errors');
 const { selectQuestions } = require('./domain');
+const { finalizeAttempt } = require('./submissions');
 
 const attemptRouter = express.Router();
 const examAttemptRouter = express.Router();
@@ -77,12 +78,8 @@ examAttemptRouter.post(
       });
 
       if (existingAttempt) {
-        // If the existing active attempt has passed its deadline, transition to expired
-        if (now > new Date(existingAttempt.expiresAt)) {
-          existingAttempt.status = 'expired';
-          if (typeof existingAttempt.save === 'function') {
-            await existingAttempt.save();
-          }
+        if (now >= new Date(existingAttempt.expiresAt)) {
+          await finalizeAttempt(existingAttempt._id || existingAttempt.id);
         } else {
           throw new HttpError(
             409,
@@ -213,12 +210,10 @@ attemptRouter.get(
     }
 
     const now = new Date();
-    if (attempt.status === 'active' && now > new Date(attempt.expiresAt)) {
-      attempt.status = 'expired';
-      attempt.submittedAt = new Date(attempt.expiresAt);
-      if (typeof attempt.save === 'function') {
-        await attempt.save();
-      }
+    if (!attempt.result && now >= new Date(attempt.expiresAt)) {
+      const result = await finalizeAttempt(attempt._id || attempt.id);
+      attempt.status = 'submitted';
+      attempt.submittedAt = result.completedAt;
     }
     const remainingSeconds = Math.max(0, Math.floor((new Date(attempt.expiresAt).getTime() - now.getTime()) / 1000));
 
@@ -291,11 +286,8 @@ attemptRouter.put(
 
     // Timer deadline check (server clock)
     const now = new Date();
-    if (now > new Date(attempt.expiresAt)) {
-      attempt.status = 'expired';
-      if (typeof attempt.save === 'function') {
-        await attempt.save();
-      }
+    if (now >= new Date(attempt.expiresAt)) {
+      await finalizeAttempt(attempt._id || attempt.id);
       throw new HttpError(409, 'ATTEMPT_EXPIRED', 'Exam deadline has expired');
     }
 
@@ -322,6 +314,20 @@ attemptRouter.put(
         'VALIDATION_ERROR',
         'Question does not belong to this attempt'
       );
+    }
+
+    const question = (attempt.questions || []).find(
+      (q) => String(q.id || q.questionId || q._id) === trimmedQuestionId
+    );
+    if (review !== undefined && typeof review !== 'boolean') {
+      throw new HttpError(400, 'VALIDATION_ERROR', 'review must be a boolean');
+    }
+    if (optionId !== undefined && optionId !== null) {
+      const index = typeof optionId === 'number' ? optionId :
+        typeof optionId === 'string' && /^(0|[1-9][0-9]*)$/.test(optionId) ? Number(optionId) : NaN;
+      if (!Number.isSafeInteger(index) || index < 0 || !question || index >= question.options.length) {
+        throw new HttpError(400, 'VALIDATION_ERROR', 'optionId must identify an available answer option');
+      }
     }
 
     if (!attempt.answers) attempt.answers = {};

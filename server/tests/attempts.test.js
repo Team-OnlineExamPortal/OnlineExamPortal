@@ -824,7 +824,7 @@ describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt
       expect(stored.status).toBe('submitted');
     });
 
-    test('lazy auto-expiry: GET /api/attempts/:id lazily marks active attempt expired after deadline', async () => {
+    test('GET after deadline finalizes and scores the attempt', async () => {
       const stored = Attempt.__store.find((a) => a.id === submitAttemptId);
       stored.expiresAt = new Date(Date.now() - 2000);
 
@@ -833,9 +833,9 @@ describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt
         .set('Authorization', `Bearer ${student1Token}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.status).toBe('expired');
+      expect(res.body.status).toBe('submitted');
       expect(res.body.remainingSeconds).toBe(0);
-      expect(stored.status).toBe('expired');
+      expect(stored.status).toBe('submitted');
     });
 
     test('rejects submission from unauthorized student with 403 FORBIDDEN', async () => {
@@ -942,7 +942,7 @@ describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt
       expect(dupRes.body.code).toBe('ACTIVE_ATTEMPT_EXISTS');
     });
 
-    test('restores attempt as expired if reconnect occurs after deadline has passed', async () => {
+    test('restores the finalized attempt after its deadline', async () => {
       const stored = Attempt.__store.find((a) => a.id === reconnectAttemptId);
       stored.expiresAt = new Date(Date.now() - 10000);
 
@@ -951,7 +951,7 @@ describe('FR-007 / FR-011 / FR-009 / FR-008: Timed Exam Attempts, Active Attempt
         .set('Authorization', `Bearer ${student1Token}`);
 
       expect(res.status).toBe(200);
-      expect(res.body.status).toBe('expired');
+      expect(res.body.status).toBe('submitted');
       expect(res.body.remainingSeconds).toBe(0);
       // Saved answers are preserved even when expired
       expect(res.body.answers[qIds[0]]).toBe('1');

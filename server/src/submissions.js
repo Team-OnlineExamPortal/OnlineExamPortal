@@ -14,7 +14,8 @@ async function finalizeAttempt(id) {
     if (attempt.result) return attempt.result;
     const score = await gradeAttempt(attempt);
     const now = new Date();
-    const completedAt = new Date(Math.min(now.getTime(), new Date(attempt.expiresAt).getTime()));
+    const completedAt = attempt.submittedAt ||
+      new Date(Math.min(now.getTime(), new Date(attempt.expiresAt).getTime()));
     const result = {
       resultId: String(attempt._id), attemptId: String(attempt._id),
       examId: String(attempt.examId), studentId: String(attempt.studentId),
