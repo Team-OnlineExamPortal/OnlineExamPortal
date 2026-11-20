@@ -24,7 +24,8 @@ async function call(method, route, { body, raw, token, expected = 200 } = {}) {
   requests += 1;
   const data = await response.json();
   assert.ok((Array.isArray(expected) ? expected : [expected]).includes(response.status), method + ' ' + route + ' returned ' + response.status);
-  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  const noSniff = (response.headers.get('x-content-type-options') || '').split(',').map((value) => value.trim().toLowerCase());
+  assert.ok(noSniff.length > 0 && noSniff.every((value) => value === 'nosniff'), 'Missing or invalid no-sniff protection');
   if (response.status >= 400) {
     assert.equal(typeof data.code, 'string');
     assert.equal(typeof data.requestId, 'string');
