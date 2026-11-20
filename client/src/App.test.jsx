@@ -167,6 +167,28 @@ describe('student portal journey (NFR-003)', () => {
     expect(examApi.saveAnswer).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the newest answer and waits for an in-flight save before submission', async () => {
+    window.history.replaceState({}, '', '/login');
+    const user = userEvent.setup();
+    let finishFirstSave;
+    examApi.saveAnswer.mockImplementationOnce(() => new Promise((resolve) => { finishFirstSave = resolve; }));
+    Object.defineProperty(window, 'confirm', { configurable: true, writable: true, value: vi.fn(() => true) });
+    renderApp();
+    await user.type(await screen.findByLabelText('Email address'), 'satyam@example.test');
+    await user.type(screen.getByLabelText('Password'), 'safe-password');
+    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.click(await screen.findByRole('link', { name: /start exam/i }));
+    await user.click(await screen.findByRole('button', { name: /correct/i }));
+    await user.click(screen.getByRole('button', { name: /wrong/i }));
+    await user.click(screen.getByRole('button', { name: /finish and submit/i }));
+    expect(examApi.saveAnswer).toHaveBeenCalledTimes(1);
+    expect(examApi.submit).not.toHaveBeenCalled();
+    finishFirstSave({ savedAt: new Date().toISOString() });
+    await waitFor(() => expect(examApi.submit).toHaveBeenCalledTimes(1));
+    expect(examApi.saveAnswer).toHaveBeenLastCalledWith('attempt-1', 'q-1', '1', false, 'jwt-student');
+    expect(localStorage.getItem('oep-attempt-pending-attempt-1')).toBeNull();
+  });
+
   it('restores an active attempt after a page reload instead of creating a second attempt', async () => {
     sessionStorage.setItem('oep_token', 'jwt-student');
     sessionStorage.setItem('oep-active-attempt-exam-1', 'attempt-1');

@@ -24,6 +24,7 @@ export default function Exam() {
   const startRequested = useRef(false);
   const attemptStorageKey = `oep-active-attempt-${examId}`;
   const retryQueue = useRef(new Map());
+  const saveInFlight = useRef(null);
 
   useEffect(() => {
     examApi.metadata(examId, token).then(setExam).catch((err) => setError(err.message));
@@ -80,14 +81,15 @@ export default function Exam() {
   async function submitAttempt(automatic = false) {
     if (!attempt || submitting.current) return;
     if (!automatic && !window.confirm('Submit your exam now? You will not be able to change your answers after submission.')) return;
+    submitting.current = true;
     if (!automatic) {
       await retryPendingSaves();
       if (retryQueue.current.size) {
         setAttemptError('Some answers are still waiting to sync. Reconnect and retry before submitting.');
+        submitting.current = false;
         return;
       }
     }
-    submitting.current = true;
     setSaveState('Submitting…');
     try {
       await examApi.submit(attempt.attemptId || attempt.id, token);
@@ -111,25 +113,13 @@ export default function Exam() {
   }, [attempt, secondsLeft]);
 
   async function chooseAnswer(question, choiceIndex) {
+    if (submitting.current) return;
     const questionId = idFor(question);
     const option = (question.options || question.choices || [])[choiceIndex];
     const optionId = typeof option === 'object' ? option.optionId || option.id || String(choiceIndex) : String(choiceIndex);
     setAnswers((previous) => ({ ...previous, [questionId]: optionId }));
-    setSaveState('Saving…');
     const operation = { questionId, optionId, review: Boolean(marked[questionId]) };
-    try {
-      await examApi.saveAnswer(attempt.attemptId || attempt.id, operation.questionId, operation.optionId, operation.review, token);
-      setSaveState('All answers saved');
-      retryQueue.current.delete(questionId);
-      persistRetryQueue();
-    } catch (err) {
-      retryQueue.current.set(questionId, operation);
-      persistRetryQueue();
-      setSaveState('Saved on this device · will retry');
-      setAttemptError(err instanceof ApiError && err.status === 404
-        ? 'The answer-save service is not available. This answer is only in this browser until it can be sent.'
-        : err.message);
-    }
+    await queueSave(operation);
   }
 
   function persistRetryQueue() {
@@ -142,27 +132,42 @@ export default function Exam() {
   }
 
   async function retryPendingSaves() {
-    for (const [questionId, operation] of retryQueue.current) {
-      try {
-        await examApi.saveAnswer(attempt.attemptId || attempt.id, questionId, operation.optionId, operation.review, token);
-        retryQueue.current.delete(questionId);
-      } catch { break; }
+    if (saveInFlight.current) return saveInFlight.current;
+    async function drain() {
+      while (retryQueue.current.size) {
+        const [questionId, operation] = retryQueue.current.entries().next().value;
+        try {
+          await examApi.saveAnswer(attempt.attemptId || attempt.id, questionId, operation.optionId, operation.review, token);
+          // A newer selection may have replaced this operation during the request.
+          if (retryQueue.current.get(questionId) === operation) retryQueue.current.delete(questionId);
+          persistRetryQueue();
+        } catch (err) {
+          setSaveState('Saved on this device · will retry');
+          setAttemptError(err.message);
+          return;
+        }
+      }
+      setSaveState('All answers saved');
+      setAttemptError('');
     }
+    saveInFlight.current = drain().finally(() => { saveInFlight.current = null; });
+    return saveInFlight.current;
+  }
+
+  function queueSave(operation) {
+    retryQueue.current.set(operation.questionId, operation);
     persistRetryQueue();
+    setSaveState('Saving…');
+    return retryPendingSaves();
   }
 
   async function toggleReview(question) {
+    if (submitting.current) return;
     const questionId = idFor(question);
     const review = !marked[questionId];
     setMarked((previous) => ({ ...previous, [questionId]: review }));
     const operation = { questionId, optionId: answers[questionId], review };
-    try {
-      await examApi.saveAnswer(attempt.attemptId || attempt.id, questionId, operation.optionId, review, token);
-      retryQueue.current.delete(questionId); persistRetryQueue();
-    } catch {
-      retryQueue.current.set(questionId, operation); persistRetryQueue();
-      setSaveState('Review flag saved on this device · will retry');
-    }
+    await queueSave(operation);
   }
 
   useEffect(() => {
